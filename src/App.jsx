@@ -730,87 +730,184 @@ function CustomersScreen() {
 }
 
 
+
 // SUPPLIERS
 function SuppliersScreen() {
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const emptyForm = { supplier_code:"", name:"", phone:"", address:"", balance:"", notes:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("suppliers").select("*").order("created_at", { ascending: false });
+    if (error) setErrorMsg("حدث خطأ أثناء تحميل الموردين");
+    else setSuppliers(data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const filtered = suppliers.filter(s => s.name?.includes(search) || s.supplier_code?.includes(search));
+  const openNew = () => { setForm(emptyForm); setEditingId(null); setShowForm(true); };
+  const openEdit = (s) => {
+    setForm({ supplier_code:s.supplier_code||"", name:s.name||"", phone:s.phone||"", address:s.address||"", balance:s.balance??"", notes:s.notes||"" });
+    setEditingId(s.id); setShowForm(true);
+  };
+  const handleSave = async () => {
+    if (!form.supplier_code || !form.name) { setErrorMsg("الكود والاسم مطلوبان"); return; }
+    setSaving(true); setErrorMsg("");
+    const payload = { supplier_code:form.supplier_code, name:form.name, phone:form.phone, address:form.address, balance:form.balance===""?0:Number(form.balance), notes:form.notes };
+    let error;
+    if (editingId) ({ error } = await supabase.from("suppliers").update(payload).eq("id", editingId));
+    else ({ error } = await supabase.from("suppliers").insert(payload));
+    setSaving(false);
+    if (error) { setErrorMsg(error.code==="23505"?"كود المورد مستخدم بالفعل":"حدث خطأ أثناء الحفظ"); return; }
+    setShowForm(false); setForm(emptyForm); setEditingId(null); load();
+  };
+  const handleDelete = async (id) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا المورد؟")) return;
+    const { error } = await supabase.from("suppliers").delete().eq("id", id);
+    if (error) setErrorMsg("تعذر حذف المورد"); else load();
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-black text-slate-800">إدارة الموردين</h1>
-        <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+        <button onClick={openNew} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
           <Icon name="plus" size={16} /> مورد جديد
         </button>
       </div>
-      <div className="space-y-3">
-        {SUPPLIERS.map(s => (
-          <Card key={s.id} className="p-4 hover:shadow-md cursor-pointer">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-slate-500 to-slate-700 rounded-xl flex items-center justify-center text-white font-black text-lg">
-                  {s.name[0]}
+      {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>}
+      {showForm && (
+        <Card className="p-5 border-2 border-blue-200 bg-blue-50/30">
+          <h3 className="font-bold text-slate-800 mb-4">{editingId?"تعديل بيانات المورد":"إضافة مورد جديد"}</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {[["كود المورد *","supplier_code","text","مثال: S001"],["اسم المورد *","name","text","الاسم الكامل"],["رقم الهاتف","phone","text","01xxxxxxxxx"],["العنوان","address","text","المدينة"],["الرصيد الافتتاحي","balance","number","0"]].map(([label,key,type,ph]) => (
+              <div key={key}>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+                <input type={type} value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder={ph} />
+              </div>
+            ))}
+            <div className="col-span-2 lg:col-span-3">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">ملاحظات</label>
+              <textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm h-16 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving?"جاري الحفظ...":editingId?"حفظ التعديلات":"إضافة المورد"}</button>
+            <button onClick={()=>{setShowForm(false);setErrorMsg("");}} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+          </div>
+        </Card>
+      )}
+      <input value={search} onChange={e=>setSearch(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="بحث بالاسم أو الكود..." />
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">جاري التحميل...</div>
+      : filtered.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">لا يوجد موردون. اضغط "مورد جديد" للبدء.</div>
+      : (
+        <div className="space-y-3">
+          {filtered.map(s => (
+            <Card key={s.id} className="p-4 hover:shadow-md transition-all">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-slate-500 to-slate-700 rounded-xl flex items-center justify-center text-white font-black text-lg">{s.name[0]}</div>
+                  <div>
+                    <p className="font-bold text-slate-800">{s.name}</p>
+                    <p className="text-xs text-slate-500">{s.phone||"—"} · {s.supplier_code}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-bold text-slate-800">{s.name}</p>
-                  <p className="text-xs text-slate-500">{s.phone} · {s.id}</p>
+                <div className="text-left">
+                  <p className="text-xs text-slate-500">المستحقات</p>
+                  <p className={`font-black text-lg ${Number(s.balance)>0?"text-red-600":"text-green-600"}`}>{Number(s.balance||0).toLocaleString()} ج</p>
                 </div>
               </div>
-              <div className="text-left">
-                <p className="text-xs text-slate-500">المستحقات</p>
-                <p className={`font-black text-lg ${s.balance > 0 ? "text-red-600" : "text-green-600"}`}>{s.balance.toLocaleString()} ج</p>
+              <div className="flex gap-2">
+                <button className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-700 py-2 rounded-lg text-xs font-semibold border border-slate-200">كشف الحساب</button>
+                <button onClick={()=>openEdit(s)} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-2 rounded-lg text-xs font-semibold border border-blue-200">تعديل</button>
+                <button onClick={()=>handleDelete(s.id)} className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 py-2 rounded-lg text-xs font-semibold border border-red-200">حذف</button>
               </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-700 py-2 rounded-lg text-xs font-semibold border border-slate-200">كشف الحساب</button>
-              <button className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-2 rounded-lg text-xs font-semibold border border-blue-200">أمر شراء</button>
-              <button className="flex-1 bg-green-50 hover:bg-green-100 text-green-700 py-2 rounded-lg text-xs font-semibold border border-green-200">تسجيل دفعة</button>
-            </div>
-          </Card>
-        ))}
-      </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // MANUFACTURING
 function ManufacturingScreen() {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
   const [active, setActive] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const emptyForm = { order_number:"", customer_id:"", product_name:"", quantity:"", unit:"قطعة", delivery_date:"", operating_cost:"", transport_cost:"", expected_revenue:"", notes:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  const load = async () => {
+    setLoading(true);
+    const [ordersRes, custRes] = await Promise.all([
+      supabase.from("manufacturing_orders").select("*, customers(name), manufacturing_materials(*, products(name))").order("created_at", { ascending: false }),
+      supabase.from("customers").select("id, name")
+    ]);
+    if (ordersRes.error) setErrorMsg("حدث خطأ أثناء التحميل");
+    else setOrders(ordersRes.data || []);
+    setCustomers(custRes.data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
 
   const calcCosts = (order) => {
-    const materialsCost = order.rawMaterials.reduce((s, m) => s + m.qtyNeeded * m.unitCost, 0);
-    const totalCost = materialsCost + order.operatingCost + order.transportCost;
-    const expectedProfit = order.expectedRevenue - totalCost;
-    const actualProfit = order.actualRevenue ? order.actualRevenue - totalCost : null;
+    const materialsCost = (order.manufacturing_materials||[]).reduce((s,m) => s + m.quantity_needed * m.unit_cost, 0);
+    const totalCost = materialsCost + Number(order.operating_cost||0) + Number(order.transport_cost||0);
+    const expectedProfit = Number(order.expected_revenue||0) - totalCost;
+    const actualProfit = order.actual_revenue ? Number(order.actual_revenue) - totalCost : null;
     return { materialsCost, totalCost, expectedProfit, actualProfit };
   };
 
-  const statusColor = (s) => s === "مكتمل" ? "green" : s === "قيد التنفيذ" ? "blue" : "yellow";
+  const statusColor = (s) => s==="مكتمل"?"green":s==="قيد التنفيذ"?"blue":"yellow";
+
+  const handleSave = async () => {
+    if (!form.order_number || !form.product_name) { setErrorMsg("رقم الأمر واسم المنتج مطلوبان"); return; }
+    setSaving(true); setErrorMsg("");
+    const payload = { order_number:form.order_number, customer_id:form.customer_id||null, product_name:form.product_name, quantity:Number(form.quantity)||0, unit:form.unit, delivery_date:form.delivery_date||null, operating_cost:Number(form.operating_cost)||0, transport_cost:Number(form.transport_cost)||0, expected_revenue:Number(form.expected_revenue)||0, notes:form.notes };
+    const { error } = await supabase.from("manufacturing_orders").insert(payload);
+    setSaving(false);
+    if (error) { setErrorMsg(error.code==="23505"?"رقم الأمر مستخدم بالفعل":"حدث خطأ أثناء الحفظ"); return; }
+    setShowNew(false); setForm(emptyForm); load();
+  };
+
+  const completeOrder = async (id) => {
+    await supabase.from("manufacturing_orders").update({ status:"مكتمل" }).eq("id", id);
+    setActive(null); load();
+  };
 
   if (active) {
-    const order = MANUFACTURING_ORDERS.find(o => o.id === active);
+    const order = orders.find(o => o.id === active);
+    if (!order) return null;
     const { materialsCost, totalCost, expectedProfit, actualProfit } = calcCosts(order);
     return (
       <div className="space-y-4">
-        <button onClick={() => setActive(null)} className="flex items-center gap-2 text-blue-600 font-semibold text-sm hover:text-blue-800">
-          ← العودة لأوامر التصنيع
-        </button>
-
-        {/* Header */}
+        <button onClick={()=>setActive(null)} className="flex items-center gap-2 text-blue-600 font-semibold text-sm hover:text-blue-800">← العودة لأوامر التصنيع</button>
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h2 className="font-black text-xl text-slate-800">{order.id}</h2>
+                <h2 className="font-black text-xl text-slate-800">{order.order_number}</h2>
                 <Badge color={statusColor(order.status)}>{order.status}</Badge>
               </div>
-              <p className="text-slate-500 text-sm">{order.product}</p>
+              <p className="text-slate-500 text-sm">{order.product_name}</p>
             </div>
-            <div className="text-left">
-              <p className="text-xs text-slate-500">تاريخ التسليم</p>
-              <p className="font-bold text-slate-800">{order.deliveryDate}</p>
-            </div>
+            <div className="text-left"><p className="text-xs text-slate-500">تسليم</p><p className="font-bold text-slate-800">{order.delivery_date||"—"}</p></div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[["العميل", order.customer], ["الكمية", `${order.qty} ${order.unit}`], ["تاريخ البدء", order.startDate], ["الهالك", order.waste > 0 ? `${order.waste} ${order.wasteUnit}` : "لا يوجد"]].map(([k, v]) => (
+            {[["العميل",order.customers?.name||"—"],["الكمية",`${order.quantity} ${order.unit}`],["تاريخ البدء",order.created_at?.split("T")[0]],["الهالك",order.waste>0?`${order.waste} طن`:"لا يوجد"]].map(([k,v])=>(
               <div key={k} className="bg-gray-50 rounded-lg p-3 text-center">
                 <p className="text-xs text-slate-500 mb-1">{k}</p>
                 <p className="text-sm font-bold text-slate-800">{v}</p>
@@ -818,96 +915,53 @@ function ManufacturingScreen() {
             ))}
           </div>
         </Card>
-
-        {/* Raw Materials */}
         <Card className="p-5">
-          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <Icon name="warehouse" size={18} /> المواد الخام المستخدمة
-          </h3>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50">
-                {["الصنف", "الكمية المطلوبة", "تكلفة الوحدة", "التكلفة الإجمالية"].map(h => (
-                  <th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>
+          <h3 className="font-bold text-slate-800 mb-3">المواد الخام</h3>
+          {(order.manufacturing_materials||[]).length === 0 ? (
+            <p className="text-slate-400 text-sm">لم تتم إضافة مواد خام بعد</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead><tr className="bg-slate-50">{["الصنف","الكمية","تكلفة الوحدة","الإجمالي"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+              <tbody>
+                {order.manufacturing_materials.map((m,i)=>(
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-2 px-3 font-semibold text-slate-800">{m.products?.name||"—"}</td>
+                    <td className="py-2 px-3 text-slate-600">{m.quantity_needed} طن</td>
+                    <td className="py-2 px-3 text-slate-600">{Number(m.unit_cost).toLocaleString()} ج</td>
+                    <td className="py-2 px-3 font-bold text-slate-800">{(m.quantity_needed*m.unit_cost).toLocaleString()} ج</td>
+                  </tr>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {order.rawMaterials.map((m, i) => (
-                <tr key={i} className="border-b border-gray-50">
-                  <td className="py-2 px-3 font-semibold text-slate-800">{m.item}</td>
-                  <td className="py-2 px-3 text-slate-600">{m.qtyNeeded} {m.unit}</td>
-                  <td className="py-2 px-3 text-slate-600">{m.unitCost.toLocaleString()} ج</td>
-                  <td className="py-2 px-3 font-bold text-slate-800">{(m.qtyNeeded * m.unitCost).toLocaleString()} ج</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex gap-2 mt-4">
-            <button className="flex items-center gap-2 bg-red-50 hover:bg-red-100 text-red-700 px-4 py-2 rounded-lg text-xs font-semibold border border-red-200">
-              <Icon name="transfer" size={14} /> صرف المواد من المخزن (خصم تلقائي)
-            </button>
-            {order.waste > 0 && (
-              <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg font-semibold">
-                <Icon name="warning" size={14} /> هالك مسجل: {order.waste} {order.wasteUnit}
-              </span>
-            )}
-          </div>
+              </tbody>
+            </table>
+          )}
         </Card>
-
-        {/* Cost & Profit */}
         <Card className="p-5">
-          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <Icon name="money" size={18} /> حساب التكلفة والربح
-          </h3>
+          <h3 className="font-bold text-slate-800 mb-3">التكلفة والربح</h3>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            {[
-              ["تكلفة المواد الخام", materialsCost, "slate"],
-              ["تكلفة التشغيل", order.operatingCost, "slate"],
-              ["تكلفة النقل", order.transportCost, "slate"],
-              ["إجمالي التكلفة", totalCost, "red"],
-            ].map(([k, v, col]) => (
-              <div key={k} className={`rounded-lg p-3 text-center ${col === "red" ? "bg-red-50 border border-red-200" : "bg-gray-50"}`}>
+            {[["تكلفة المواد",materialsCost,"slate"],["تكلفة التشغيل",Number(order.operating_cost||0),"slate"],["تكلفة النقل",Number(order.transport_cost||0),"slate"],["إجمالي التكلفة",totalCost,"red"]].map(([k,v,col])=>(
+              <div key={k} className={`rounded-lg p-3 text-center ${col==="red"?"bg-red-50 border border-red-200":"bg-gray-50"}`}>
                 <p className="text-xs text-slate-500 mb-1">{k}</p>
-                <p className={`font-black ${col === "red" ? "text-red-700" : "text-slate-800"}`}>{v.toLocaleString()} ج</p>
+                <p className={`font-black ${col==="red"?"text-red-700":"text-slate-800"}`}>{v.toLocaleString()} ج</p>
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
               <p className="text-xs text-blue-600 mb-1">الإيراد المتوقع</p>
-              <p className="font-black text-xl text-blue-700">{order.expectedRevenue.toLocaleString()} ج</p>
+              <p className="font-black text-xl text-blue-700">{Number(order.expected_revenue||0).toLocaleString()} ج</p>
             </div>
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
               <p className="text-xs text-green-600 mb-1">الربح المتوقع</p>
               <p className="font-black text-xl text-green-700">{expectedProfit.toLocaleString()} ج</p>
             </div>
-            <div className={`rounded-xl p-4 text-center border ${actualProfit !== null ? "bg-amber-50 border-amber-200" : "bg-gray-50 border-gray-200"}`}>
-              <p className={`text-xs mb-1 ${actualProfit !== null ? "text-amber-600" : "text-slate-400"}`}>الربح الفعلي</p>
-              <p className={`font-black text-xl ${actualProfit !== null ? "text-amber-700" : "text-slate-400"}`}>
-                {actualProfit !== null ? `${actualProfit.toLocaleString()} ج` : "لم يكتمل بعد"}
-              </p>
+            <div className={`rounded-xl p-4 text-center border ${actualProfit!==null?"bg-amber-50 border-amber-200":"bg-gray-50 border-gray-200"}`}>
+              <p className={`text-xs mb-1 ${actualProfit!==null?"text-amber-600":"text-slate-400"}`}>الربح الفعلي</p>
+              <p className={`font-black text-xl ${actualProfit!==null?"text-amber-700":"text-slate-400"}`}>{actualProfit!==null?`${actualProfit.toLocaleString()} ج`:"لم يكتمل"}</p>
             </div>
           </div>
         </Card>
-
-        {order.status === "مكتمل" && (
-          <Card className="p-5 border-2 border-green-200 bg-green-50/30">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="text-green-600"><Icon name="check" size={24} /></div>
-                <div>
-                  <p className="font-bold text-slate-800">تمت إضافة المنتج النهائي للمخزون</p>
-                  <p className="text-xs text-slate-500">{order.qty} {order.unit} من "{order.product}" — التكلفة النهائية للوحدة: {(totalCost / order.qty).toLocaleString(undefined, { maximumFractionDigits: 0 })} ج</p>
-                </div>
-              </div>
-              <Badge color="green">مضاف للمخزون</Badge>
-            </div>
-          </Card>
-        )}
-
         {order.status !== "مكتمل" && (
-          <button className="w-full bg-gradient-to-l from-green-600 to-green-700 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 hover:from-green-700 hover:to-green-800">
+          <button onClick={()=>completeOrder(order.id)} className="w-full bg-gradient-to-l from-green-600 to-green-700 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 hover:from-green-700 hover:to-green-800">
             <Icon name="check" size={18} /> إنهاء الأمر وإضافة المنتج للمخزون
           </button>
         )}
@@ -919,87 +973,102 @@ function ManufacturingScreen() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-black text-slate-800">التصنيع</h1>
-        <button onClick={() => setShowNew(!showNew)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+        <button onClick={()=>setShowNew(!showNew)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
           <Icon name="plus" size={16} /> أمر تصنيع جديد
         </button>
       </div>
-
-      {/* Stats */}
+      {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="أوامر قيد التنفيذ" value={MANUFACTURING_ORDERS.filter(o => o.status === "قيد التنفيذ").length} icon="manufacturing" color="blue" />
-        <StatCard label="أوامر مكتملة" value={MANUFACTURING_ORDERS.filter(o => o.status === "مكتمل").length} icon="check" color="green" />
-        <StatCard label="بانتظار المواد" value={MANUFACTURING_ORDERS.filter(o => o.status === "بانتظار المواد").length} icon="warning" color="gold" />
-        <StatCard label="إجمالي الأرباح المتوقعة" value={`${MANUFACTURING_ORDERS.reduce((s, o) => s + calcCosts(o).expectedProfit, 0).toLocaleString()} ج`} icon="money" color="steel" />
+        <StatCard label="قيد التنفيذ" value={orders.filter(o=>o.status==="قيد التنفيذ").length} icon="manufacturing" color="blue" />
+        <StatCard label="مكتملة" value={orders.filter(o=>o.status==="مكتمل").length} icon="check" color="green" />
+        <StatCard label="بانتظار المواد" value={orders.filter(o=>o.status==="بانتظار المواد").length} icon="warning" color="gold" />
+        <StatCard label="إجمالي الأوامر" value={orders.length} icon="reports" color="steel" />
       </div>
-
       {showNew && (
         <Card className="p-5 border-2 border-blue-200 bg-blue-50/30">
           <h3 className="font-bold text-slate-800 mb-4">إنشاء أمر تصنيع جديد</h3>
           <div className="grid grid-cols-2 gap-4">
-            {[["العميل", "اختر العميل"], ["المنتج النهائي", "اسم المنتج"], ["الكمية المطلوبة", "0"], ["تاريخ التسليم", "yyyy-mm-dd"]].map(([label, ph]) => (
-              <div key={label}>
+            {[["رقم الأمر *","order_number","text","MFG-001"],["المنتج النهائي *","product_name","text","اسم المنتج"],["الكمية","quantity","number","0"],["الوحدة","unit","text","قطعة"],["تاريخ التسليم","delivery_date","date",""],["الإيراد المتوقع","expected_revenue","number","0"],["تكلفة التشغيل","operating_cost","number","0"],["تكلفة النقل","transport_cost","number","0"]].map(([label,key,type,ph])=>(
+              <div key={key}>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
-                <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder={ph} />
+                <input type={type} value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder={ph} />
               </div>
             ))}
-          </div>
-          <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-lg p-3 text-center text-sm text-slate-500">
-            سيتم إضافة المواد الخام وتفاصيل التكلفة بعد إنشاء الأمر
+            <div className="col-span-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">العميل</label>
+              <select value={form.customer_id} onChange={e=>setForm({...form,customer_id:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                <option value="">-- اختر العميل (اختياري) --</option>
+                {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
           </div>
           <div className="flex gap-2 mt-4">
-            <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold">إنشاء الأمر</button>
-            <button onClick={() => setShowNew(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+            <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving?"جاري الحفظ...":"إنشاء الأمر"}</button>
+            <button onClick={()=>setShowNew(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
           </div>
         </Card>
       )}
-
-      {/* Orders list */}
-      <div className="space-y-3">
-        {MANUFACTURING_ORDERS.map(o => {
-          const { totalCost, expectedProfit } = calcCosts(o);
-          return (
-            <Card key={o.id} className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-blue-200" onClick={() => setActive(o.id)}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="bg-blue-100 rounded-xl p-2 text-blue-700"><Icon name="manufacturing" size={20} /></div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-slate-800">{o.id}</p>
-                      <Badge color={statusColor(o.status)}>{o.status}</Badge>
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">جاري التحميل...</div>
+      : orders.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">لا توجد أوامر تصنيع بعد.</div>
+      : (
+        <div className="space-y-3">
+          {orders.map(o => {
+            const { totalCost, expectedProfit } = calcCosts(o);
+            return (
+              <Card key={o.id} className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-blue-200" onClick={()=>setActive(o.id)}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 rounded-xl p-2 text-blue-700"><Icon name="manufacturing" size={20} /></div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-800">{o.order_number}</p>
+                        <Badge color={statusColor(o.status)}>{o.status}</Badge>
+                      </div>
+                      <p className="text-xs text-slate-500">{o.product_name} · {o.customers?.name||"بدون عميل"}</p>
                     </div>
-                    <p className="text-xs text-slate-500">{o.product} · {o.customer}</p>
                   </div>
+                  <div className="text-left"><p className="text-xs text-slate-500">تسليم</p><p className="text-sm font-bold text-slate-700">{o.delivery_date||"—"}</p></div>
                 </div>
-                <div className="text-left">
-                  <p className="text-xs text-slate-500">تسليم</p>
-                  <p className="text-sm font-bold text-slate-700">{o.deliveryDate}</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {[["الكمية",`${o.quantity} ${o.unit}`],["التكلفة",`${totalCost.toLocaleString()} ج`],["ربح متوقع",`${expectedProfit.toLocaleString()} ج`]].map(([k,v])=>(
+                    <div key={k} className="bg-gray-50 rounded-lg p-2 text-center">
+                      <p className="text-xs text-slate-500">{k}</p>
+                      <p className="text-xs font-bold text-slate-800 mt-0.5">{v}</p>
+                    </div>
+                  ))}
                 </div>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {[["الكمية", `${o.qty} ${o.unit}`], ["تكلفة إجمالية", `${totalCost.toLocaleString()} ج`], ["ربح متوقع", `${expectedProfit.toLocaleString()} ج`], ["ربح فعلي", o.actualRevenue ? `${(o.actualRevenue - totalCost).toLocaleString()} ج` : "—"]].map(([k, v]) => (
-                  <div key={k} className="bg-gray-50 rounded-lg p-2 text-center">
-                    <p className="text-xs text-slate-500">{k}</p>
-                    <p className="text-xs font-bold text-slate-800 mt-0.5">{v}</p>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Manufacturing Reports */}
-      <Card className="p-5">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <Icon name="reports" size={18} /> تقارير التصنيع
-        </h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {["أوامر التصنيع المنفذة", "تكلفة كل أمر", "استهلاك المواد الخام", "الأرباح"].map(r => (
-            <button key={r} className="bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg p-3 text-center transition-all">
-              <p className="text-xs font-semibold text-slate-700">{r}</p>
-            </button>
-          ))}
+              </Card>
+            );
+          })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// SALES STUB
+function SalesScreen() {
+  return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-black text-slate-800">المبيعات</h1>
+      <Card className="p-8 text-center">
+        <div className="text-slate-300 flex justify-center mb-4"><Icon name="sales" size={48} /></div>
+        <p className="text-slate-600 font-bold mb-2">شاشة المبيعات</p>
+        <p className="text-slate-400 text-sm">سيتم ربطها بقاعدة البيانات في الخطوة القادمة</p>
+      </Card>
+    </div>
+  );
+}
+
+// PURCHASES STUB
+function PurchasesScreen() {
+  return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-black text-slate-800">المشتريات</h1>
+      <Card className="p-8 text-center">
+        <div className="text-slate-300 flex justify-center mb-4"><Icon name="purchase" size={48} /></div>
+        <p className="text-slate-600 font-bold mb-2">شاشة المشتريات</p>
+        <p className="text-slate-400 text-sm">سيتم ربطها بقاعدة البيانات في الخطوة القادمة</p>
       </Card>
     </div>
   );
@@ -1253,6 +1322,8 @@ export default function App() {
       case "products": return <ProductsScreen />;
       case "customers": return <CustomersScreen />;
       case "suppliers": return <SuppliersScreen />;
+      case "sales": return <SalesScreen />;
+      case "purchases": return <PurchasesScreen />;
       case "manufacturing": return <ManufacturingScreen />;
       case "hr": return <HRScreen />;
       case "reports": return <ReportsScreen />;
