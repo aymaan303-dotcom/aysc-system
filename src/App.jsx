@@ -467,9 +467,104 @@ function ProductsScreen() {
 
 // CUSTOMERS
 function CustomersScreen() {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [search, setSearch] = useState("");
   const [active, setActive] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const emptyForm = {
+    customer_code: "", name: "", phone: "", address: "",
+    credit_limit: "", balance: "", notes: "",
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  const loadCustomers = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("customers")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) setErrorMsg("حدث خطأ أثناء تحميل العملاء");
+    else setCustomers(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadCustomers(); }, []);
+
+  const filtered = customers.filter(
+    c => c.name?.includes(search) || c.customer_code?.includes(search) || c.phone?.includes(search)
+  );
+
+  const openNewForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setShowForm(true);
+    setActive(null);
+  };
+
+  const openEditForm = (c) => {
+    setForm({
+      customer_code: c.customer_code || "",
+      name: c.name || "",
+      phone: c.phone || "",
+      address: c.address || "",
+      credit_limit: c.credit_limit ?? "",
+      balance: c.balance ?? "",
+      notes: c.notes || "",
+    });
+    setEditingId(c.id);
+    setShowForm(true);
+    setActive(null);
+  };
+
+  const handleSave = async () => {
+    if (!form.customer_code || !form.name) {
+      setErrorMsg("الكود والاسم مطلوبان");
+      return;
+    }
+    setSaving(true);
+    setErrorMsg("");
+    const payload = {
+      customer_code: form.customer_code,
+      name: form.name,
+      phone: form.phone,
+      address: form.address,
+      credit_limit: form.credit_limit === "" ? 0 : Number(form.credit_limit),
+      balance: form.balance === "" ? 0 : Number(form.balance),
+      notes: form.notes,
+    };
+    let error;
+    if (editingId) {
+      ({ error } = await supabase.from("customers").update(payload).eq("id", editingId));
+    } else {
+      ({ error } = await supabase.from("customers").insert(payload));
+    }
+    setSaving(false);
+    if (error) {
+      setErrorMsg(error.code === "23505" ? "كود العميل ده مستخدم بالفعل" : "حدث خطأ أثناء الحفظ");
+      return;
+    }
+    setShowForm(false);
+    setForm(emptyForm);
+    setEditingId(null);
+    loadCustomers();
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا العميل؟")) return;
+    const { error } = await supabase.from("customers").delete().eq("id", id);
+    if (error) setErrorMsg("تعذر حذف العميل");
+    else loadCustomers();
+  };
+
+  // صفحة تفاصيل العميل
   if (active) {
-    const c = CUSTOMERS.find(x => x.id === active);
+    const c = customers.find(x => x.id === active);
+    if (!c) return null;
     return (
       <div className="space-y-4">
         <button onClick={() => setActive(null)} className="flex items-center gap-2 text-blue-600 font-semibold text-sm hover:text-blue-800">
@@ -482,38 +577,41 @@ function CustomersScreen() {
                 {c.name[0]}
               </div>
               <h2 className="font-black text-slate-800 text-lg">{c.name}</h2>
-              <p className="text-slate-500 text-sm">{c.id}</p>
+              <p className="text-slate-500 text-sm">{c.customer_code}</p>
             </div>
             <div className="space-y-3 text-sm">
-              {[["الهاتف", c.phone], ["الحد الائتماني", `${c.credit.toLocaleString()} ج`], ["الرصيد المستحق", `${c.balance.toLocaleString()} ج`], ["آخر سداد", c.lastPayment]].map(([k, v]) => (
+              {[
+                ["الهاتف", c.phone || "—"],
+                ["العنوان", c.address || "—"],
+                ["الحد الائتماني", `${Number(c.credit_limit || 0).toLocaleString()} ج`],
+                ["الرصيد المستحق", `${Number(c.balance || 0).toLocaleString()} ج`],
+              ].map(([k, v]) => (
                 <div key={k} className="flex justify-between border-b border-gray-50 pb-2">
                   <span className="text-slate-500">{k}</span>
                   <span className="font-semibold text-slate-800">{v}</span>
                 </div>
               ))}
-              <div className="pt-2"><Badge color={c.overdue ? "red" : "green"}>{c.overdue ? "متأخر في السداد" : "منتظم"}</Badge></div>
+              {c.notes && <p className="text-xs text-slate-500 pt-2">{c.notes}</p>}
+              <div className="pt-2">
+                <Badge color={c.balance > 0 ? "red" : "green"}>
+                  {c.balance > 0 ? "يوجد رصيد مستحق" : "لا يوجد مديونية"}
+                </Badge>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => openEditForm(c)} className="flex-1 bg-blue-50 border border-blue-200 text-blue-700 py-2 rounded-lg text-xs font-semibold hover:bg-blue-100">تعديل</button>
+              <button onClick={() => handleDelete(c.id)} className="flex-1 bg-red-50 border border-red-200 text-red-700 py-2 rounded-lg text-xs font-semibold hover:bg-red-100">حذف</button>
             </div>
           </Card>
           <Card className="p-5 col-span-2">
             <h3 className="font-bold text-slate-800 mb-4">كشف الحساب</h3>
-            <div className="space-y-2">
-              {[
-                { date: "2024-01-22", desc: "فاتورة مبيعات INV-001", debit: 76000, credit: 0 },
-                { date: "2024-01-20", desc: "دفعة نقدية", debit: 0, credit: 30000 },
-                { date: "2024-01-15", desc: "فاتورة مبيعات INV-000", debit: 50000, credit: 50000 },
-              ].map((row, i) => (
-                <div key={i} className="flex justify-between items-center bg-gray-50 rounded-lg px-4 py-3 text-sm">
-                  <span className="text-slate-500 w-24">{row.date}</span>
-                  <span className="flex-1 text-slate-700 font-semibold text-right pr-4">{row.desc}</span>
-                  <span className="w-24 text-center text-red-600 font-bold">{row.debit ? row.debit.toLocaleString() : "—"}</span>
-                  <span className="w-24 text-center text-green-600 font-bold">{row.credit ? row.credit.toLocaleString() : "—"}</span>
-                </div>
-              ))}
+            <div className="text-center py-8 text-slate-400 text-sm">
+              كشف الحساب سيتوفر بعد ربط جدول المبيعات والمدفوعات
             </div>
-            <div className="mt-4 flex justify-end gap-4">
+            <div className="flex justify-end">
               <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-center">
                 <p className="text-xs text-red-500">إجمالي المديونية</p>
-                <p className="font-black text-red-700">{c.balance.toLocaleString()} ج</p>
+                <p className="font-black text-red-700">{Number(c.balance || 0).toLocaleString()} ج</p>
               </div>
             </div>
           </Card>
@@ -521,43 +619,116 @@ function CustomersScreen() {
       </div>
     );
   }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-black text-slate-800">إدارة العملاء</h1>
-        <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+        <button onClick={openNewForm} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
           <Icon name="plus" size={16} /> عميل جديد
         </button>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {CUSTOMERS.map(c => (
-          <Card key={c.id} className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-blue-200" onClick={() => setActive(c.id)}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl flex items-center justify-center text-white font-black text-lg">
-                  {c.name[0]}
-                </div>
-                <div>
-                  <p className="font-bold text-slate-800">{c.name}</p>
-                  <p className="text-xs text-slate-500">{c.phone} · {c.id}</p>
-                </div>
+
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>
+      )}
+
+      {showForm && (
+        <Card className="p-5 border-2 border-blue-200 bg-blue-50/30">
+          <h3 className="font-bold text-slate-800 mb-4">{editingId ? "تعديل بيانات العميل" : "إضافة عميل جديد"}</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              ["كود العميل *", "customer_code", "text", "مثال: C001"],
+              ["اسم العميل *", "name", "text", "الاسم الكامل"],
+              ["رقم الهاتف", "phone", "text", "01xxxxxxxxx"],
+              ["العنوان", "address", "text", "المدينة - الحي"],
+              ["الحد الائتماني", "credit_limit", "number", "0"],
+              ["الرصيد الافتتاحي", "balance", "number", "0"],
+            ].map(([label, key, type, ph]) => (
+              <div key={key}>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+                <input
+                  type={type}
+                  value={form[key]}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder={ph}
+                />
               </div>
-              <Badge color={c.overdue ? "red" : "green"}>{c.overdue ? "متأخر" : "منتظم"}</Badge>
+            ))}
+            <div className="col-span-2 lg:col-span-3">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">ملاحظات</label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 h-16"
+                placeholder="أي ملاحظات إضافية..."
+              />
             </div>
-            <div className="grid grid-cols-3 gap-2 mt-4">
-              {[["الحد الائتماني", `${c.credit.toLocaleString()} ج`, "blue"], ["الرصيد", `${c.balance.toLocaleString()} ج`, c.balance > 0 ? "red" : "green"], ["آخر سداد", c.lastPayment, "gray"]].map(([k, v, col]) => (
-                <div key={k} className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-                  <p className="text-xs text-slate-500 mb-1">{k}</p>
-                  <p className={`text-xs font-bold ${col === "red" ? "text-red-600" : col === "green" ? "text-green-600" : "text-slate-700"}`}>{v}</p>
-                </div>
-              ))}
-            </div>
-          </Card>
-        ))}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">
+              {saving ? "جاري الحفظ..." : editingId ? "حفظ التعديلات" : "إضافة العميل"}
+            </button>
+            <button onClick={() => { setShowForm(false); setErrorMsg(""); }} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">
+              إلغاء
+            </button>
+          </div>
+        </Card>
+      )}
+
+      <div className="mb-4">
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          className="w-full border border-gray-200 rounded-lg px-4 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="بحث بالاسم أو الكود أو الهاتف..." />
       </div>
+
+      {loading ? (
+        <div className="text-center py-10 text-slate-400 text-sm">جاري تحميل العملاء...</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-10 text-slate-400 text-sm">لا يوجد عملاء بعد. اضغط "عميل جديد" للبدء.</div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filtered.map(c => (
+            <Card key={c.id} className="p-4 hover:shadow-md transition-all hover:border-blue-200">
+              <div className="flex items-center justify-between mb-3" onClick={() => setActive(c.id)} style={{cursor:"pointer"}}>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl flex items-center justify-center text-white font-black text-lg">
+                    {c.name[0]}
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800">{c.name}</p>
+                    <p className="text-xs text-slate-500">{c.phone || "—"} · {c.customer_code}</p>
+                  </div>
+                </div>
+                <Badge color={c.balance > 0 ? "red" : "green"}>
+                  {c.balance > 0 ? "مديون" : "سوي"}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {[
+                  ["الحد الائتماني", `${Number(c.credit_limit || 0).toLocaleString()} ج`, "blue"],
+                  ["الرصيد المستحق", `${Number(c.balance || 0).toLocaleString()} ج`, c.balance > 0 ? "red" : "green"],
+                ].map(([k, v, col]) => (
+                  <div key={k} className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                    <p className="text-xs text-slate-500 mb-1">{k}</p>
+                    <p className={`text-xs font-bold ${col === "red" ? "text-red-600" : col === "green" ? "text-green-600" : "text-slate-700"}`}>{v}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setActive(c.id)} className="flex-1 bg-slate-50 border border-slate-200 text-slate-700 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-100">كشف الحساب</button>
+                <button onClick={() => openEditForm(c)} className="flex-1 bg-blue-50 border border-blue-200 text-blue-700 py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-100">تعديل</button>
+                <button onClick={() => handleDelete(c.id)} className="flex-1 bg-red-50 border border-red-200 text-red-700 py-1.5 rounded-lg text-xs font-semibold hover:bg-red-100">حذف</button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
 
 // SUPPLIERS
 function SuppliersScreen() {
