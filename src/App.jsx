@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import LoginScreen from "./LoginScreen";
 import { supabase } from "./supabaseClient";
 
@@ -250,15 +250,161 @@ function Dashboard() {
 // PRODUCTS
 function ProductsScreen() {
   const [search, setSearch] = useState("");
-  const filtered = PRODUCTS.filter(p => p.name.includes(search) || p.id.includes(search));
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const emptyForm = {
+    product_code: "", name: "", type: "", size: "", unit: "طن",
+    theoretical_weight: "", buy_price: "", sell_price: "", reorder_level: "", stock: "",
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  const loadProducts = async () => {
+    setLoading(true);
+    setErrorMsg("");
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      setErrorMsg("حدث خطأ أثناء تحميل الأصناف");
+    } else {
+      setProducts(data || []);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadProducts(); }, []);
+
+  const filtered = products.filter(
+    p => p.name?.includes(search) || p.product_code?.includes(search)
+  );
+
+  const openNewForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setShowForm(true);
+  };
+
+  const openEditForm = (p) => {
+    setForm({
+      product_code: p.product_code || "",
+      name: p.name || "",
+      type: p.type || "",
+      size: p.size || "",
+      unit: p.unit || "طن",
+      theoretical_weight: p.theoretical_weight ?? "",
+      buy_price: p.buy_price ?? "",
+      sell_price: p.sell_price ?? "",
+      reorder_level: p.reorder_level ?? "",
+      stock: p.stock ?? "",
+    });
+    setEditingId(p.id);
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.product_code || !form.name) {
+      setErrorMsg("الكود والاسم مطلوبان");
+      return;
+    }
+    setSaving(true);
+    setErrorMsg("");
+
+    const payload = {
+      product_code: form.product_code,
+      name: form.name,
+      type: form.type,
+      size: form.size,
+      unit: form.unit,
+      theoretical_weight: form.theoretical_weight === "" ? null : Number(form.theoretical_weight),
+      buy_price: form.buy_price === "" ? 0 : Number(form.buy_price),
+      sell_price: form.sell_price === "" ? 0 : Number(form.sell_price),
+      reorder_level: form.reorder_level === "" ? 0 : Number(form.reorder_level),
+      stock: form.stock === "" ? 0 : Number(form.stock),
+    };
+
+    let error;
+    if (editingId) {
+      ({ error } = await supabase.from("products").update(payload).eq("id", editingId));
+    } else {
+      ({ error } = await supabase.from("products").insert(payload));
+    }
+
+    setSaving(false);
+    if (error) {
+      setErrorMsg(error.code === "23505" ? "كود الصنف ده مستخدم بالفعل" : "حدث خطأ أثناء الحفظ");
+      return;
+    }
+    setShowForm(false);
+    setForm(emptyForm);
+    setEditingId(null);
+    loadProducts();
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا الصنف؟")) return;
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) setErrorMsg("تعذر حذف الصنف");
+    else loadProducts();
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-black text-slate-800">إدارة الأصناف</h1>
-        <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+        <button onClick={openNewForm} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
           <Icon name="plus" size={16} /> صنف جديد
         </button>
       </div>
+
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>
+      )}
+
+      {showForm && (
+        <Card className="p-5 border-2 border-blue-200 bg-blue-50/30">
+          <h3 className="font-bold text-slate-800 mb-4">{editingId ? "تعديل الصنف" : "إضافة صنف جديد"}</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              ["كود الصنف *", "product_code", "text", "مثال: P006"],
+              ["اسم الصنف *", "name", "text", "مثال: حديد تسليح 16 مم"],
+              ["النوع", "type", "text", "مثال: تسليح"],
+              ["المقاس", "size", "text", "مثال: 16 مم"],
+              ["الوحدة", "unit", "text", "طن"],
+              ["الوزن النظري", "theoretical_weight", "number", "0"],
+              ["سعر الشراء", "buy_price", "number", "0"],
+              ["سعر البيع", "sell_price", "number", "0"],
+              ["حد إعادة الطلب", "reorder_level", "number", "0"],
+              ["الكمية الحالية بالمخزون", "stock", "number", "0"],
+            ].map(([label, key, type, ph]) => (
+              <div key={key}>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+                <input
+                  type={type}
+                  value={form[key]}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder={ph}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">
+              {saving ? "جاري الحفظ..." : editingId ? "حفظ التعديلات" : "إضافة الصنف"}
+            </button>
+            <button onClick={() => { setShowForm(false); setErrorMsg(""); }} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">
+              إلغاء
+            </button>
+          </div>
+        </Card>
+      )}
+
       <Card className="p-4">
         <div className="relative mb-4">
           <Icon name="search" size={16} />
@@ -266,44 +412,58 @@ function ProductsScreen() {
             className="w-full border border-gray-200 rounded-lg px-4 py-2 pr-10 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="بحث بالاسم أو الكود..." />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 rounded-lg">
-                {["الكود", "الاسم", "النوع", "المقاس", "الوحدة", "سعر الشراء", "سعر البيع", "المخزون", "الحالة"].map(h => (
-                  <th key={h} className="text-right py-3 px-3 text-slate-600 font-bold first:rounded-r-lg last:rounded-l-lg">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(p => (
-                <tr key={p.id} className="border-b border-gray-50 hover:bg-blue-50/50 cursor-pointer">
-                  <td className="py-3 px-3 font-mono text-xs text-blue-700 font-bold">{p.id}</td>
-                  <td className="py-3 px-3 font-bold text-slate-800">{p.name}</td>
-                  <td className="py-3 px-3"><Badge color="blue">{p.type}</Badge></td>
-                  <td className="py-3 px-3 text-slate-600">{p.size}</td>
-                  <td className="py-3 px-3 text-slate-600">{p.unit}</td>
-                  <td className="py-3 px-3 text-slate-700">{p.buyPrice.toLocaleString()} ج</td>
-                  <td className="py-3 px-3 font-bold text-green-700">{p.sellPrice.toLocaleString()} ج</td>
-                  <td className="py-3 px-3">
-                    <span className={`font-bold ${p.stock <= p.reorderLevel ? "text-red-600" : "text-slate-700"}`}>
-                      {p.stock} {p.unit}
-                    </span>
-                  </td>
-                  <td className="py-3 px-3">
-                    <Badge color={p.stock <= p.reorderLevel ? "red" : "green"}>
-                      {p.stock <= p.reorderLevel ? "منخفض" : "متاح"}
-                    </Badge>
-                  </td>
+
+        {loading ? (
+          <div className="text-center py-10 text-slate-400 text-sm">جاري تحميل الأصناف...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-10 text-slate-400 text-sm">لا توجد أصناف مضافة بعد. اضغط "صنف جديد" للبدء.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 rounded-lg">
+                  {["الكود", "الاسم", "النوع", "المقاس", "الوحدة", "سعر الشراء", "سعر البيع", "المخزون", "الحالة", ""].map(h => (
+                    <th key={h} className="text-right py-3 px-3 text-slate-600 font-bold first:rounded-r-lg last:rounded-l-lg">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map(p => (
+                  <tr key={p.id} className="border-b border-gray-50 hover:bg-blue-50/50">
+                    <td className="py-3 px-3 font-mono text-xs text-blue-700 font-bold">{p.product_code}</td>
+                    <td className="py-3 px-3 font-bold text-slate-800">{p.name}</td>
+                    <td className="py-3 px-3">{p.type && <Badge color="blue">{p.type}</Badge>}</td>
+                    <td className="py-3 px-3 text-slate-600">{p.size}</td>
+                    <td className="py-3 px-3 text-slate-600">{p.unit}</td>
+                    <td className="py-3 px-3 text-slate-700">{Number(p.buy_price || 0).toLocaleString()} ج</td>
+                    <td className="py-3 px-3 font-bold text-green-700">{Number(p.sell_price || 0).toLocaleString()} ج</td>
+                    <td className="py-3 px-3">
+                      <span className={`font-bold ${p.stock <= p.reorder_level ? "text-red-600" : "text-slate-700"}`}>
+                        {p.stock} {p.unit}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3">
+                      <Badge color={p.stock <= p.reorder_level ? "red" : "green"}>
+                        {p.stock <= p.reorder_level ? "منخفض" : "متاح"}
+                      </Badge>
+                    </td>
+                    <td className="py-3 px-3">
+                      <div className="flex gap-2">
+                        <button onClick={() => openEditForm(p)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold">تعديل</button>
+                        <button onClick={() => handleDelete(p.id)} className="text-xs text-red-600 hover:text-red-800 font-semibold">حذف</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );
 }
+
 
 // CUSTOMERS
 function CustomersScreen() {
