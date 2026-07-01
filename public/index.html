@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AYSC - نظام إدارة تجارة الحديد</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @media print {
+        body * { visibility: hidden; }
+        #print-invoice, #print-invoice * { visibility: visible; }
+        #print-invoice { position: fixed; top: 0; right: 0; width: 100%; padding: 20px; font-family: Arial, sans-serif; }
+        .no-print { display: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
