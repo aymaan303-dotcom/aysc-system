@@ -1238,6 +1238,8 @@ function SalesScreen({ user }) {
       </body></html>`);
     win.document.close();
   };
+
+  const totalSales = sales.reduce((s, inv) => s + Number(inv.total || 0), 0);
   const totalPaid = sales.reduce((s, inv) => s + Number(inv.paid || 0), 0);
   const totalRemaining = totalSales - totalPaid;
 
