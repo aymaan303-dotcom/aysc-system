@@ -148,101 +148,150 @@ const StatCard = ({ label, value, sub, icon, color = "blue", trend }) => {
 
 // ─── SCREENS ──────────────────────────────────────────────────────────────────
 
-// DASHBOARD
-function Dashboard() {
-  const lowStock = PRODUCTS.filter(p => p.stock <= p.reorderLevel);
-  const overdueCustomers = CUSTOMERS.filter(c => c.overdue);
+// DASHBOARD - LIVE
+function Dashboard({ user }) {
+  const [stats, setStats] = useState({ salesToday: 0, purchasesToday: 0, totalSales: 0, totalPurchases: 0, stockCount: 0, stockValue: 0 });
+  const [lowStock, setLowStock] = useState([]);
+  const [overdueCustomers, setOverdueCustomers] = useState([]);
+  const [recentSales, setRecentSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const today = new Date().toISOString().split("T")[0];
+
+  const load = async () => {
+    setLoading(true);
+    const [salesRes, purchRes, prodRes, custRes] = await Promise.all([
+      supabase.from("sales").select("total, paid, created_at, invoice_number, status, customers(name)").order("created_at", { ascending: false }),
+      supabase.from("purchases").select("total, paid, created_at").order("created_at", { ascending: false }),
+      supabase.from("products").select("name, stock, reorder_level, unit, sell_price"),
+      supabase.from("customers").select("name, balance"),
+    ]);
+
+    const sales = salesRes.data || [];
+    const purchases = purchRes.data || [];
+    const products = prodRes.data || [];
+    const customers = custRes.data || [];
+
+    const salesToday = sales.filter(s => s.created_at?.startsWith(today)).reduce((sum, s) => sum + Number(s.total || 0), 0);
+    const purchasesToday = purchases.filter(p => p.created_at?.startsWith(today)).reduce((sum, p) => sum + Number(p.total || 0), 0);
+    const totalSales = sales.reduce((sum, s) => sum + Number(s.total || 0), 0);
+    const totalPurchases = purchases.reduce((sum, p) => sum + Number(p.total || 0), 0);
+    const stockValue = products.reduce((sum, p) => sum + (Number(p.stock || 0) * Number(p.sell_price || 0)), 0);
+
+    setStats({ salesToday, purchasesToday, totalSales, totalPurchases, stockCount: products.length, stockValue });
+    setLowStock(products.filter(p => Number(p.stock) <= Number(p.reorder_level || 0)));
+    setOverdueCustomers(customers.filter(c => Number(c.balance) > 0));
+    setRecentSales(sales.slice(0, 5));
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("ar-EG", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-slate-800">لوحة التحكم</h1>
-          <p className="text-slate-500 text-sm">الإثنين، 22 يناير 2024</p>
+          <p className="text-slate-500 text-sm">{dateStr}</p>
         </div>
         <div className="flex gap-2">
-          <Badge color="blue">الفرع الرئيسي</Badge>
-          <Badge color="green">متصل</Badge>
+          <Badge color="blue">{user?.branch || "الفرع الرئيسي"}</Badge>
+          <button onClick={load} className="text-xs text-blue-600 hover:text-blue-800 font-semibold bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">↻ تحديث</button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard label="إجمالي مبيعات اليوم" value="387,900 ج" icon="sales" color="blue" trend={12} />
-        <StatCard label="إجمالي مشتريات اليوم" value="215,000 ج" icon="purchase" color="steel" trend={-5} />
-        <StatCard label="رصيد الصندوق" value="124,500 ج" icon="money" color="green" />
-        <StatCard label="رصيد البنك" value="892,300 ج" icon="accounts" color="gold" />
-        <StatCard label="إجمالي المخزون" value="142 طن" icon="warehouse" color="steel" />
-        <StatCard label="حركة البسكول اليوم" value="7 شاحنات" icon="truck" color="blue" />
-      </div>
-
-      {/* Alerts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="text-yellow-500"><Icon name="warning" size={20} /></div>
-            <h3 className="font-bold text-slate-800">أصناف منخفضة الكمية</h3>
-            <Badge color="yellow">{lowStock.length}</Badge>
+      {loading ? (
+        <div className="text-center py-10 text-slate-400 text-sm">جاري تحميل البيانات...</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard label="مبيعات اليوم" value={`${stats.salesToday.toLocaleString()} ج`} icon="sales" color="blue" />
+            <StatCard label="مشتريات اليوم" value={`${stats.purchasesToday.toLocaleString()} ج`} icon="purchase" color="steel" />
+            <StatCard label="إجمالي المبيعات" value={`${stats.totalSales.toLocaleString()} ج`} icon="money" color="green" />
+            <StatCard label="إجمالي المشتريات" value={`${stats.totalPurchases.toLocaleString()} ج`} icon="accounts" color="gold" />
+            <StatCard label="عدد الأصناف" value={`${stats.stockCount} صنف`} icon="warehouse" color="steel" />
+            <StatCard label="قيمة المخزون" value={`${stats.stockValue.toLocaleString()} ج`} icon="products" color="blue" />
           </div>
-          <div className="space-y-2">
-            {lowStock.map(p => (
-              <div key={p.id} className="flex items-center justify-between bg-yellow-50 rounded-lg px-3 py-2 border border-yellow-100">
-                <span className="text-sm font-semibold text-slate-700">{p.name}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">متاح: {p.stock} {p.unit}</span>
-                  <Badge color="red">تحت الحد</Badge>
-                </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card className="p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="text-yellow-500"><Icon name="warning" size={20} /></div>
+                <h3 className="font-bold text-slate-800">أصناف منخفضة الكمية</h3>
+                <Badge color={lowStock.length > 0 ? "yellow" : "green"}>{lowStock.length}</Badge>
               </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="text-red-500"><Icon name="customers" size={20} /></div>
-            <h3 className="font-bold text-slate-800">عملاء متأخرون في السداد</h3>
-            <Badge color="red">{overdueCustomers.length}</Badge>
-          </div>
-          <div className="space-y-2">
-            {overdueCustomers.map(c => (
-              <div key={c.id} className="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2 border border-red-100">
-                <span className="text-sm font-semibold text-slate-700">{c.name}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-red-600 font-bold">{c.balance.toLocaleString()} ج</span>
-                  <Badge color="red">متأخر</Badge>
+              {lowStock.length === 0 ? (
+                <p className="text-sm text-green-600 font-semibold text-center py-4">✓ جميع الأصناف فوق حد إعادة الطلب</p>
+              ) : (
+                <div className="space-y-2">
+                  {lowStock.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between bg-yellow-50 rounded-lg px-3 py-2 border border-yellow-100">
+                      <span className="text-sm font-semibold text-slate-700">{p.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500">متاح: {p.stock} {p.unit}</span>
+                        <Badge color="red">تحت الحد</Badge>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+              )}
+            </Card>
 
-      {/* Recent Sales */}
-      <Card className="p-4">
-        <h3 className="font-bold text-slate-800 mb-4">آخر المبيعات</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {["رقم الفاتورة", "التاريخ", "العميل", "الإجمالي", "المدفوع", "الحالة"].map(h => (
-                  <th key={h} className="text-right py-2 px-3 text-slate-500 font-semibold">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SALES.map(s => (
-                <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="py-2 px-3 font-mono text-blue-600 font-semibold">{s.id}</td>
-                  <td className="py-2 px-3 text-slate-600">{s.date}</td>
-                  <td className="py-2 px-3 font-semibold text-slate-800">{s.customer}</td>
-                  <td className="py-2 px-3 font-bold text-slate-800">{s.total.toLocaleString()} ج</td>
-                  <td className="py-2 px-3 text-green-600 font-semibold">{s.paid.toLocaleString()} ج</td>
-                  <td className="py-2 px-3"><Badge color={s.status === "مكتمل" ? "green" : "yellow"}>{s.status}</Badge></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+            <Card className="p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="text-red-500"><Icon name="customers" size={20} /></div>
+                <h3 className="font-bold text-slate-800">عملاء لديهم أرصدة مستحقة</h3>
+                <Badge color={overdueCustomers.length > 0 ? "red" : "green"}>{overdueCustomers.length}</Badge>
+              </div>
+              {overdueCustomers.length === 0 ? (
+                <p className="text-sm text-green-600 font-semibold text-center py-4">✓ لا توجد أرصدة مستحقة</p>
+              ) : (
+                <div className="space-y-2">
+                  {overdueCustomers.slice(0, 5).map((c, i) => (
+                    <div key={i} className="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2 border border-red-100">
+                      <span className="text-sm font-semibold text-slate-700">{c.name}</span>
+                      <span className="text-xs text-red-600 font-bold">{Number(c.balance).toLocaleString()} ج</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+
+          <Card className="p-4">
+            <h3 className="font-bold text-slate-800 mb-4">آخر الفواتير</h3>
+            {recentSales.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-4">لا توجد فواتير بعد</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {["رقم الفاتورة", "التاريخ", "العميل", "الإجمالي", "المدفوع", "الحالة"].map(h => (
+                        <th key={h} className="text-right py-2 px-3 text-slate-500 font-semibold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentSales.map(s => (
+                      <tr key={s.invoice_number} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="py-2 px-3 font-mono text-blue-600 font-semibold text-xs">{s.invoice_number}</td>
+                        <td className="py-2 px-3 text-slate-600">{s.created_at?.split("T")[0]}</td>
+                        <td className="py-2 px-3 font-semibold text-slate-800">{s.customers?.name || "—"}</td>
+                        <td className="py-2 px-3 font-bold text-slate-800">{Number(s.total).toLocaleString()} ج</td>
+                        <td className="py-2 px-3 text-green-600 font-semibold">{Number(s.paid).toLocaleString()} ج</td>
+                        <td className="py-2 px-3"><Badge color={s.status === "مكتمل" ? "green" : s.status === "جزئي" ? "yellow" : "red"}>{s.status}</Badge></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
     </div>
   );
 }
@@ -1046,116 +1095,1246 @@ function ManufacturingScreen() {
   );
 }
 
-// SALES STUB
-function SalesScreen() {
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-black text-slate-800">المبيعات</h1>
-      <Card className="p-8 text-center">
-        <div className="text-slate-300 flex justify-center mb-4"><Icon name="sales" size={48} /></div>
-        <p className="text-slate-600 font-bold mb-2">شاشة المبيعات</p>
-        <p className="text-slate-400 text-sm">سيتم ربطها بقاعدة البيانات في الخطوة القادمة</p>
-      </Card>
-    </div>
-  );
-}
+// SALES
+function SalesScreen({ user }) {
+  const [sales, setSales] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [active, setActive] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-// PURCHASES STUB
-function PurchasesScreen() {
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-black text-slate-800">المشتريات</h1>
-      <Card className="p-8 text-center">
-        <div className="text-slate-300 flex justify-center mb-4"><Icon name="purchase" size={48} /></div>
-        <p className="text-slate-600 font-bold mb-2">شاشة المشتريات</p>
-        <p className="text-slate-400 text-sm">سيتم ربطها بقاعدة البيانات في الخطوة القادمة</p>
-      </Card>
-    </div>
-  );
-}
+  const emptyForm = { invoice_number: "", customer_id: "", notes: "", discount: "0", paid: "0" };
+  const [form, setForm] = useState(emptyForm);
+  const [items, setItems] = useState([{ product_id: "", quantity: "", unit_price: "" }]);
 
-// HR
-function HRScreen() {
+  const load = async () => {
+    setLoading(true);
+    const [salesRes, custRes, prodRes] = await Promise.all([
+      supabase.from("sales").select("*, customers(name), sale_items(*, products(name, unit))").order("created_at", { ascending: false }),
+      supabase.from("customers").select("id, name, balance"),
+      supabase.from("products").select("id, name, unit, sell_price, stock"),
+    ]);
+    if (salesRes.error) setErrorMsg("خطأ في تحميل المبيعات");
+    else setSales(salesRes.data || []);
+    setCustomers(custRes.data || []);
+    setProducts(prodRes.data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const itemsTotal = items.reduce((s, i) => s + (Number(i.quantity) * Number(i.unit_price) || 0), 0);
+  const netTotal = itemsTotal - Number(form.discount || 0);
+  const remaining = netTotal - Number(form.paid || 0);
+  const status = remaining <= 0 ? "مكتمل" : Number(form.paid) > 0 ? "جزئي" : "غير مدفوع";
+
+  const addItem = () => setItems([...items, { product_id: "", quantity: "", unit_price: "" }]);
+  const removeItem = (i) => setItems(items.filter((_, idx) => idx !== i));
+  const updateItem = (i, field, val) => {
+    const updated = [...items];
+    updated[i] = { ...updated[i], [field]: val };
+    if (field === "product_id") {
+      const prod = products.find(p => p.id === val);
+      if (prod) updated[i].unit_price = prod.sell_price;
+    }
+    setItems(updated);
+  };
+
+  const handleSave = async () => {
+    if (!form.invoice_number || !form.customer_id) { setErrorMsg("رقم الفاتورة والعميل مطلوبان"); return; }
+    if (items.some(i => !i.product_id || !i.quantity)) { setErrorMsg("تأكد من اختيار الصنف والكمية لكل بند"); return; }
+    setSaving(true); setErrorMsg("");
+
+    const salePayload = {
+      invoice_number: form.invoice_number,
+      customer_id: form.customer_id,
+      total: netTotal,
+      paid: Number(form.paid || 0),
+      discount: Number(form.discount || 0),
+      notes: form.notes,
+      status,
+    };
+
+    const { data: saleData, error: saleError } = await supabase.from("sales").insert(salePayload).select().single();
+    if (saleError) {
+      setSaving(false);
+      setErrorMsg(saleError.code === "23505" ? "رقم الفاتورة مستخدم بالفعل" : "خطأ أثناء حفظ الفاتورة");
+      return;
+    }
+
+    const itemsPayload = items.map(i => ({
+      sale_id: saleData.id,
+      product_id: i.product_id,
+      quantity: Number(i.quantity),
+      unit_price: Number(i.unit_price),
+      total: Number(i.quantity) * Number(i.unit_price),
+    }));
+    const { error: itemsError } = await supabase.from("sale_items").insert(itemsPayload);
+
+    // تحديث رصيد العميل
+    const customer = customers.find(c => c.id === form.customer_id);
+    if (customer) {
+      const newBalance = Number(customer.balance || 0) + remaining;
+      await supabase.from("customers").update({ balance: newBalance }).eq("id", form.customer_id);
+    }
+
+    // خصم من المخزون
+    for (const item of items) {
+      const prod = products.find(p => p.id === item.product_id);
+      if (prod) {
+        await supabase.from("products").update({ stock: Number(prod.stock) - Number(item.quantity) }).eq("id", item.product_id);
+      }
+    }
+
+    setSaving(false);
+    if (itemsError) { setErrorMsg("تم حفظ الفاتورة لكن حدث خطأ في البنود"); return; }
+    setShowForm(false); setForm(emptyForm); setItems([{ product_id: "", quantity: "", unit_price: "" }]); load();
+  };
+
+  const printInvoice = (inv) => {
+    const items = (inv.sale_items || []).map(item => `
+      <tr style="border-bottom:1px solid #eee">
+        <td style="padding:8px;text-align:right">${item.products?.name || "—"}</td>
+        <td style="padding:8px;text-align:center">${item.quantity} ${item.products?.unit || ""}</td>
+        <td style="padding:8px;text-align:center">${Number(item.unit_price).toLocaleString()} ج</td>
+        <td style="padding:8px;text-align:center;font-weight:bold">${Number(item.total).toLocaleString()} ج</td>
+      </tr>`).join("");
+    const win = window.open("", "_blank");
+    win.document.write(`
+      <html dir="rtl"><head><title>فاتورة ${inv.invoice_number}</title>
+      <style>body{font-family:Arial,sans-serif;padding:30px;color:#1e293b} table{width:100%;border-collapse:collapse} th{background:#1e3a5f;color:white;padding:10px;text-align:center} .total-box{background:#f8fafc;border:2px solid #e2e8f0;border-radius:8px;padding:15px;margin-top:20px} @media print{button{display:none}}</style>
+      </head><body>
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:15px;margin-bottom:20px">
+        <div>
+          <h1 style="color:#1e3a5f;font-size:28px;margin:0">AYSC</h1>
+          <p style="color:#64748b;margin:5px 0 0">نظام إدارة تجارة الحديد</p>
+        </div>
+        <div style="text-align:left">
+          <h2 style="color:#1e3a5f;margin:0">فاتورة بيع</h2>
+          <p style="color:#64748b;margin:5px 0 0">رقم: <strong>${inv.invoice_number}</strong></p>
+          <p style="color:#64748b;margin:0">التاريخ: ${inv.created_at?.split("T")[0]}</p>
+        </div>
+      </div>
+      <div style="background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:20px">
+        <strong>العميل:</strong> ${inv.customers?.name || "—"}
+      </div>
+      <table>
+        <thead><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
+        <tbody>${items}</tbody>
+      </table>
+      <div class="total-box" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div><span style="color:#64748b">إجمالي الفاتورة:</span> <strong>${Number(inv.total).toLocaleString()} ج</strong></div>
+        <div><span style="color:#64748b">الخصم:</span> <strong style="color:#ef4444">${Number(inv.discount||0).toLocaleString()} ج</strong></div>
+        <div><span style="color:#64748b">المدفوع:</span> <strong style="color:#16a34a">${Number(inv.paid).toLocaleString()} ج</strong></div>
+        <div><span style="color:#64748b">المتبقي:</span> <strong style="color:#ef4444">${(Number(inv.total)-Number(inv.paid)).toLocaleString()} ج</strong></div>
+      </div>
+      <div style="margin-top:40px;display:flex;justify-content:space-between;color:#64748b;font-size:12px">
+        <span>توقيع العميل: _________________</span>
+        <span>توقيع المندوب: _________________</span>
+      </div>
+      <button onclick="window.print()" style="margin-top:20px;background:#1e3a5f;color:white;border:none;padding:10px 30px;border-radius:8px;cursor:pointer;font-size:16px">طباعة</button>
+      </body></html>`);
+    win.document.close();
+  };
+  const totalPaid = sales.reduce((s, inv) => s + Number(inv.paid || 0), 0);
+  const totalRemaining = totalSales - totalPaid;
+
+  // صفحة تفاصيل الفاتورة
+  if (active) {
+    const inv = sales.find(s => s.id === active);
+    if (!inv) return null;
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setActive(null)} className="flex items-center gap-2 text-blue-600 font-semibold text-sm hover:text-blue-800">← العودة للفواتير</button>
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="font-black text-xl text-slate-800">{inv.invoice_number}</h2>
+                <Badge color={inv.status==="مكتمل"?"green":inv.status==="جزئي"?"yellow":"red"}>{inv.status}</Badge>
+              </div>
+              <p className="text-slate-500 text-sm">{inv.customers?.name} · {inv.created_at?.split("T")[0]}</p>
+            </div>
+            <button onClick={() => printInvoice(inv)} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold">
+              <Icon name="print" size={16} /> طباعة
+            </button>
+          </div>
+          <table className="w-full text-sm mb-4">
+            <thead><tr className="bg-slate-50">{["الصنف","الكمية","سعر الوحدة","الإجمالي"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+            <tbody>
+              {(inv.sale_items||[]).map((item,i)=>(
+                <tr key={i} className="border-b border-gray-50">
+                  <td className="py-2 px-3 font-semibold text-slate-800">{item.products?.name||"—"}</td>
+                  <td className="py-2 px-3 text-slate-600">{item.quantity} {item.products?.unit||""}</td>
+                  <td className="py-2 px-3 text-slate-600">{Number(item.unit_price).toLocaleString()} ج</td>
+                  <td className="py-2 px-3 font-bold text-slate-800">{Number(item.total).toLocaleString()} ج</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="flex justify-end">
+            <div className="space-y-2 text-sm w-64">
+              {[["الإجمالي قبل الخصم",Number(inv.total)+Number(inv.discount||0),"slate"],["الخصم",Number(inv.discount||0),"red"],["الإجمالي",Number(inv.total),"slate"],["المدفوع",Number(inv.paid),"green"],["المتبقي",Number(inv.total)-Number(inv.paid),"red"]].map(([k,v,col])=>(
+                <div key={k} className="flex justify-between border-b border-gray-100 pb-1">
+                  <span className="text-slate-500">{k}</span>
+                  <span className={`font-bold ${col==="green"?"text-green-700":col==="red"?"text-red-700":"text-slate-800"}`}>{v.toLocaleString()} ج</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-black text-slate-800">الموارد البشرية</h1>
-        <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
-          <Icon name="plus" size={16} /> موظف جديد
+        <h1 className="text-2xl font-black text-slate-800">المبيعات</h1>
+        <button onClick={() => { setShowForm(!showForm); setErrorMsg(""); }} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+          <Icon name="plus" size={16} /> فاتورة جديدة
         </button>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
-        {[["إجمالي الموظفين", EMPLOYEES.length, "blue"], ["الحاضرون اليوم", EMPLOYEES.filter(e => e.attendance === "حاضر").length, "green"], ["إجمالي الرواتب", `${EMPLOYEES.reduce((s, e) => s + e.salary, 0).toLocaleString()} ج`, "gold"]].map(([k, v, col]) => (
-          <Card key={k} className={`p-4 border-r-4 ${col === "blue" ? "border-blue-500" : col === "green" ? "border-green-500" : "border-amber-500"}`}>
+        <StatCard label="إجمالي المبيعات" value={`${totalSales.toLocaleString()} ج`} icon="sales" color="blue" />
+        <StatCard label="إجمالي المحصل" value={`${totalPaid.toLocaleString()} ج`} icon="money" color="green" />
+        <StatCard label="إجمالي المتبقي" value={`${totalRemaining.toLocaleString()} ج`} icon="warning" color="gold" />
+      </div>
+
+      {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>}
+
+      {showForm && (
+        <Card className="p-5 border-2 border-blue-200 bg-blue-50/30">
+          <h3 className="font-bold text-slate-800 mb-4">فاتورة بيع جديدة</h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">رقم الفاتورة *</label>
+              <input value={form.invoice_number} onChange={e=>setForm({...form,invoice_number:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="INV-001" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">العميل *</label>
+              <select value={form.customer_id} onChange={e=>setForm({...form,customer_id:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                <option value="">-- اختر العميل --</option>
+                {customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-bold text-slate-700 text-sm">البنود</h4>
+              <button onClick={addItem} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"><Icon name="plus" size={14} /> إضافة بند</button>
+            </div>
+            <div className="space-y-2">
+              {items.map((item, i) => (
+                <div key={i} className="grid grid-cols-4 gap-2 items-end">
+                  <div className="col-span-2">
+                    <select value={item.product_id} onChange={e=>updateItem(i,"product_id",e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                      <option value="">-- اختر الصنف --</option>
+                      {products.map(p=><option key={p.id} value={p.id}>{p.name} (متاح: {p.stock} {p.unit})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <input type="number" value={item.quantity} onChange={e=>updateItem(i,"quantity",e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="الكمية" />
+                  </div>
+                  <div className="flex gap-1">
+                    <input type="number" value={item.unit_price} onChange={e=>updateItem(i,"unit_price",e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="السعر" />
+                    {items.length > 1 && <button onClick={()=>removeItem(i)} className="text-red-500 hover:text-red-700 px-2">✕</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-4 mb-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">الخصم (ج)</label>
+                <input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">المدفوع (ج)</label>
+                <input type="number" value={form.paid} onChange={e=>setForm({...form,paid:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+              <div className="flex flex-col justify-end">
+                <div className="bg-white border border-blue-200 rounded-lg p-3 text-center">
+                  <p className="text-xs text-slate-500">الإجمالي</p>
+                  <p className="font-black text-blue-700 text-lg">{netTotal.toLocaleString()} ج</p>
+                  <p className="text-xs text-slate-500 mt-1">متبقي: <span className={`font-bold ${remaining>0?"text-red-600":"text-green-600"}`}>{remaining.toLocaleString()} ج</span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">ملاحظات</label>
+            <textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm h-16 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+
+          <div className="flex gap-2 mt-4">
+            <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving?"جاري الحفظ...":"حفظ الفاتورة"}</button>
+            <button onClick={()=>{setShowForm(false);setErrorMsg("");}} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+          </div>
+        </Card>
+      )}
+
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">جاري تحميل الفواتير...</div>
+      : sales.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">لا توجد فواتير بعد. اضغط "فاتورة جديدة" للبدء.</div>
+      : (
+        <Card className="p-4">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50">
+                  {["رقم الفاتورة","التاريخ","العميل","الإجمالي","المدفوع","المتبقي","الحالة",""].map(h=>(
+                    <th key={h} className="text-right py-3 px-3 text-slate-600 font-bold">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sales.map(s=>(
+                  <tr key={s.id} className="border-b border-gray-50 hover:bg-blue-50/50 cursor-pointer">
+                    <td className="py-3 px-3 font-mono text-blue-700 font-bold text-xs">{s.invoice_number}</td>
+                    <td className="py-3 px-3 text-slate-600">{s.created_at?.split("T")[0]}</td>
+                    <td className="py-3 px-3 font-semibold text-slate-800">{s.customers?.name||"—"}</td>
+                    <td className="py-3 px-3 font-bold text-slate-800">{Number(s.total).toLocaleString()} ج</td>
+                    <td className="py-3 px-3 text-green-600 font-semibold">{Number(s.paid).toLocaleString()} ج</td>
+                    <td className="py-3 px-3 text-red-600 font-semibold">{(Number(s.total)-Number(s.paid)).toLocaleString()} ج</td>
+                    <td className="py-3 px-3"><Badge color={s.status==="مكتمل"?"green":s.status==="جزئي"?"yellow":"red"}>{s.status}</Badge></td>
+                    <td className="py-3 px-3"><button onClick={()=>setActive(s.id)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold">عرض</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// PURCHASES
+function PurchasesScreen() {
+  const [purchases, setPurchases] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [active, setActive] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const emptyForm = { invoice_number:"", supplier_id:"", notes:"", discount:"0", paid:"0" };
+  const [form, setForm] = useState(emptyForm);
+  const [items, setItems] = useState([{ product_id:"", quantity:"", unit_price:"" }]);
+
+  const load = async () => {
+    setLoading(true);
+    const [purchRes, suppRes, prodRes] = await Promise.all([
+      supabase.from("purchases").select("*, suppliers(name), purchase_items(*, products(name, unit))").order("created_at", { ascending: false }),
+      supabase.from("suppliers").select("id, name, balance"),
+      supabase.from("products").select("id, name, unit, buy_price, stock"),
+    ]);
+    if (purchRes.error) setErrorMsg("خطأ في تحميل المشتريات");
+    else setPurchases(purchRes.data || []);
+    setSuppliers(suppRes.data || []);
+    setProducts(prodRes.data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const itemsTotal = items.reduce((s,i) => s + (Number(i.quantity)*Number(i.unit_price)||0), 0);
+  const netTotal = itemsTotal - Number(form.discount||0);
+  const remaining = netTotal - Number(form.paid||0);
+  const status = remaining <= 0 ? "مكتمل" : Number(form.paid) > 0 ? "جزئي" : "غير مدفوع";
+
+  const addItem = () => setItems([...items, { product_id:"", quantity:"", unit_price:"" }]);
+  const removeItem = (i) => setItems(items.filter((_,idx)=>idx!==i));
+  const updateItem = (i, field, val) => {
+    const updated = [...items];
+    updated[i] = { ...updated[i], [field]: val };
+    if (field === "product_id") {
+      const prod = products.find(p=>p.id===val);
+      if (prod) updated[i].unit_price = prod.buy_price;
+    }
+    setItems(updated);
+  };
+
+  const handleSave = async () => {
+    if (!form.invoice_number || !form.supplier_id) { setErrorMsg("رقم الفاتورة والمورد مطلوبان"); return; }
+    if (items.some(i=>!i.product_id||!i.quantity)) { setErrorMsg("تأكد من اختيار الصنف والكمية لكل بند"); return; }
+    setSaving(true); setErrorMsg("");
+
+    const payload = { invoice_number:form.invoice_number, supplier_id:form.supplier_id, total:netTotal, paid:Number(form.paid||0), discount:Number(form.discount||0), notes:form.notes, status };
+    const { data: purchData, error: purchError } = await supabase.from("purchases").insert(payload).select().single();
+    if (purchError) { setSaving(false); setErrorMsg(purchError.code==="23505"?"رقم الفاتورة مستخدم بالفعل":"خطأ أثناء الحفظ"); return; }
+
+    const itemsPayload = items.map(i=>({ purchase_id:purchData.id, product_id:i.product_id, quantity:Number(i.quantity), unit_price:Number(i.unit_price), total:Number(i.quantity)*Number(i.unit_price) }));
+    await supabase.from("purchase_items").insert(itemsPayload);
+
+    // تحديث رصيد المورد
+    const supplier = suppliers.find(s=>s.id===form.supplier_id);
+    if (supplier) await supabase.from("suppliers").update({ balance: Number(supplier.balance||0) + remaining }).eq("id", form.supplier_id);
+
+    // إضافة للمخزون
+    for (const item of items) {
+      const prod = products.find(p=>p.id===item.product_id);
+      if (prod) await supabase.from("products").update({ stock: Number(prod.stock) + Number(item.quantity) }).eq("id", item.product_id);
+    }
+
+    setSaving(false);
+    setShowForm(false); setForm(emptyForm); setItems([{ product_id:"", quantity:"", unit_price:"" }]); load();
+  };
+
+  const totalPurchases = purchases.reduce((s,p)=>s+Number(p.total||0),0);
+  const totalPaid = purchases.reduce((s,p)=>s+Number(p.paid||0),0);
+
+  if (active) {
+    const inv = purchases.find(p=>p.id===active);
+    if (!inv) return null;
+    return (
+      <div className="space-y-4">
+        <button onClick={()=>setActive(null)} className="flex items-center gap-2 text-blue-600 font-semibold text-sm hover:text-blue-800">← العودة للمشتريات</button>
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="font-black text-xl text-slate-800">{inv.invoice_number}</h2>
+                <Badge color={inv.status==="مكتمل"?"green":inv.status==="جزئي"?"yellow":"red"}>{inv.status}</Badge>
+              </div>
+              <p className="text-slate-500 text-sm">{inv.suppliers?.name} · {inv.created_at?.split("T")[0]}</p>
+            </div>
+          </div>
+          <table className="w-full text-sm mb-4">
+            <thead><tr className="bg-slate-50">{["الصنف","الكمية","سعر الوحدة","الإجمالي"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+            <tbody>
+              {(inv.purchase_items||[]).map((item,i)=>(
+                <tr key={i} className="border-b border-gray-50">
+                  <td className="py-2 px-3 font-semibold text-slate-800">{item.products?.name||"—"}</td>
+                  <td className="py-2 px-3 text-slate-600">{item.quantity} {item.products?.unit||""}</td>
+                  <td className="py-2 px-3 text-slate-600">{Number(item.unit_price).toLocaleString()} ج</td>
+                  <td className="py-2 px-3 font-bold text-slate-800">{Number(item.total).toLocaleString()} ج</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="flex justify-end">
+            <div className="space-y-2 text-sm w-64">
+              {[["الإجمالي",Number(inv.total),"slate"],["المدفوع",Number(inv.paid),"green"],["المتبقي",Number(inv.total)-Number(inv.paid),"red"]].map(([k,v,col])=>(
+                <div key={k} className="flex justify-between border-b border-gray-100 pb-1">
+                  <span className="text-slate-500">{k}</span>
+                  <span className={`font-bold ${col==="green"?"text-green-700":col==="red"?"text-red-700":"text-slate-800"}`}>{v.toLocaleString()} ج</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-black text-slate-800">المشتريات</h1>
+        <button onClick={()=>{setShowForm(!showForm);setErrorMsg("");}} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+          <Icon name="plus" size={16} /> فاتورة شراء جديدة
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <StatCard label="إجمالي المشتريات" value={`${totalPurchases.toLocaleString()} ج`} icon="purchase" color="steel" />
+        <StatCard label="إجمالي المدفوع" value={`${totalPaid.toLocaleString()} ج`} icon="money" color="green" />
+      </div>
+
+      {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>}
+
+      {showForm && (
+        <Card className="p-5 border-2 border-blue-200 bg-blue-50/30">
+          <h3 className="font-bold text-slate-800 mb-4">فاتورة شراء جديدة</h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">رقم الفاتورة *</label>
+              <input value={form.invoice_number} onChange={e=>setForm({...form,invoice_number:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="PUR-001" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">المورد *</label>
+              <select value={form.supplier_id} onChange={e=>setForm({...form,supplier_id:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                <option value="">-- اختر المورد --</option>
+                {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-bold text-slate-700 text-sm">البنود</h4>
+              <button onClick={addItem} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"><Icon name="plus" size={14} /> إضافة بند</button>
+            </div>
+            <div className="space-y-2">
+              {items.map((item,i)=>(
+                <div key={i} className="grid grid-cols-4 gap-2 items-end">
+                  <div className="col-span-2">
+                    <select value={item.product_id} onChange={e=>updateItem(i,"product_id",e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                      <option value="">-- اختر الصنف --</option>
+                      {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <input type="number" value={item.quantity} onChange={e=>updateItem(i,"quantity",e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="الكمية" />
+                  <div className="flex gap-1">
+                    <input type="number" value={item.unit_price} onChange={e=>updateItem(i,"unit_price",e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="السعر" />
+                    {items.length>1 && <button onClick={()=>removeItem(i)} className="text-red-500 hover:text-red-700 px-2">✕</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-4 mb-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">الخصم (ج)</label>
+                <input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">المدفوع (ج)</label>
+                <input type="number" value={form.paid} onChange={e=>setForm({...form,paid:e.target.value})} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+              <div className="flex flex-col justify-end">
+                <div className="bg-white border border-blue-200 rounded-lg p-3 text-center">
+                  <p className="text-xs text-slate-500">الإجمالي</p>
+                  <p className="font-black text-blue-700 text-lg">{netTotal.toLocaleString()} ج</p>
+                  <p className="text-xs text-slate-500 mt-1">متبقي: <span className={`font-bold ${remaining>0?"text-red-600":"text-green-600"}`}>{remaining.toLocaleString()} ج</span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving?"جاري الحفظ...":"حفظ الفاتورة"}</button>
+            <button onClick={()=>{setShowForm(false);setErrorMsg("");}} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+          </div>
+        </Card>
+      )}
+
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">جاري تحميل المشتريات...</div>
+      : purchases.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">لا توجد فواتير مشتريات بعد.</div>
+      : (
+        <Card className="p-4">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50">
+                  {["رقم الفاتورة","التاريخ","المورد","الإجمالي","المدفوع","المتبقي","الحالة",""].map(h=>(
+                    <th key={h} className="text-right py-3 px-3 text-slate-600 font-bold">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {purchases.map(p=>(
+                  <tr key={p.id} className="border-b border-gray-50 hover:bg-blue-50/50">
+                    <td className="py-3 px-3 font-mono text-blue-700 font-bold text-xs">{p.invoice_number}</td>
+                    <td className="py-3 px-3 text-slate-600">{p.created_at?.split("T")[0]}</td>
+                    <td className="py-3 px-3 font-semibold text-slate-800">{p.suppliers?.name||"—"}</td>
+                    <td className="py-3 px-3 font-bold text-slate-800">{Number(p.total).toLocaleString()} ج</td>
+                    <td className="py-3 px-3 text-green-600 font-semibold">{Number(p.paid).toLocaleString()} ج</td>
+                    <td className="py-3 px-3 text-red-600 font-semibold">{(Number(p.total)-Number(p.paid)).toLocaleString()} ج</td>
+                    <td className="py-3 px-3"><Badge color={p.status==="مكتمل"?"green":p.status==="جزئي"?"yellow":"red"}>{p.status}</Badge></td>
+                    <td className="py-3 px-3"><button onClick={()=>setActive(p.id)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold">عرض</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// HR - LIVE
+function HRScreen() {
+  const [tab, setTab] = useState("employees");
+  const [employees, setEmployees] = useState([]);
+  const [advances, setAdvances] = useState([]);
+  const [payroll, setPayroll] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [showAdvForm, setShowAdvForm] = useState(false);
+  const [showPayForm, setShowPayForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [advForm, setAdvForm] = useState({ employee_id: "", amount: "", reason: "" });
+  const [payForm, setPayForm] = useState({ employee_id: "", month: "", basic_salary: "", bonus: "0", deductions: "0", advances: "0", notes: "" });
+
+  const load = async () => {
+    setLoading(true);
+    const [empRes, advRes, payRes] = await Promise.all([
+      supabase.from("employees").select("*, roles(name_ar), branches(name)").order("created_at"),
+      supabase.from("advances").select("*, employees(full_name)").order("created_at", { ascending: false }),
+      supabase.from("payroll").select("*, employees(full_name)").order("created_at", { ascending: false }),
+    ]);
+    setEmployees(empRes.data || []);
+    setAdvances(advRes.data || []);
+    setPayroll(payRes.data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const totalSalaries = employees.reduce((s, e) => s + Number(e.salary || 0), 0);
+
+  const saveAdvance = async () => {
+    if (!advForm.employee_id || !advForm.amount) { setErrorMsg("الموظف والمبلغ مطلوبان"); return; }
+    setSaving(true);
+    const { error } = await supabase.from("advances").insert({ employee_id: advForm.employee_id, amount: Number(advForm.amount), reason: advForm.reason });
+    setSaving(false);
+    if (error) { setErrorMsg("خطأ أثناء الحفظ"); return; }
+    setShowAdvForm(false); setAdvForm({ employee_id: "", amount: "", reason: "" }); load();
+  };
+
+  const savePayroll = async () => {
+    if (!payForm.employee_id || !payForm.month) { setErrorMsg("الموظف والشهر مطلوبان"); return; }
+    setSaving(true);
+    const net = Number(payForm.basic_salary || 0) + Number(payForm.bonus || 0) - Number(payForm.deductions || 0) - Number(payForm.advances || 0);
+    const { error } = await supabase.from("payroll").insert({ ...payForm, basic_salary: Number(payForm.basic_salary || 0), bonus: Number(payForm.bonus || 0), deductions: Number(payForm.deductions || 0), advances: Number(payForm.advances || 0), net_salary: net });
+    setSaving(false);
+    if (error) { setErrorMsg("خطأ أثناء الحفظ"); return; }
+    setShowPayForm(false); setPayForm({ employee_id: "", month: "", basic_salary: "", bonus: "0", deductions: "0", advances: "0", notes: "" }); load();
+  };
+
+  const markAttendance = async (empId, status) => {
+    const today = new Date().toISOString().split("T")[0];
+    await supabase.from("attendance").upsert({ employee_id: empId, date: today, status }, { onConflict: "employee_id,date" });
+    load();
+  };
+
+  const tabs = [
+    { id: "employees", label: "الموظفون" },
+    { id: "attendance", label: "الحضور" },
+    { id: "advances", label: "السلف" },
+    { id: "payroll", label: "الرواتب" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-black text-slate-800">الموارد البشرية</h1>
+      </div>
+
+      {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>}
+
+      <div className="grid grid-cols-3 gap-4">
+        {[["إجمالي الموظفين", employees.length, "blue"], ["إجمالي الرواتب", `${totalSalaries.toLocaleString()} ج`, "gold"], ["السلف المستحقة", `${advances.filter(a => a.status === "غير مسدد").reduce((s, a) => s + Number(a.amount || 0), 0).toLocaleString()} ج`, "red"]].map(([k, v, col]) => (
+          <Card key={k} className={`p-4 border-r-4 ${col === "blue" ? "border-blue-500" : col === "gold" ? "border-amber-500" : "border-red-500"}`}>
             <p className="text-2xl font-black text-slate-800">{v}</p>
             <p className="text-sm text-slate-500">{k}</p>
           </Card>
         ))}
       </div>
 
-      <Card className="p-4">
-        <h3 className="font-bold text-slate-800 mb-4">قائمة الموظفين</h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50">
-              {["الكود", "الاسم", "الوظيفة", "الفرع", "الراتب", "الحضور"].map(h => (
-                <th key={h} className="text-right py-3 px-3 text-slate-600 font-bold">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {EMPLOYEES.map(e => (
-              <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                <td className="py-3 px-3 font-mono text-xs text-blue-700 font-bold">{e.id}</td>
-                <td className="py-3 px-3 font-bold text-slate-800">{e.name}</td>
-                <td className="py-3 px-3"><Badge color="blue">{e.role}</Badge></td>
-                <td className="py-3 px-3 text-slate-600">{e.branch}</td>
-                <td className="py-3 px-3 font-bold text-slate-800">{e.salary.toLocaleString()} ج</td>
-                <td className="py-3 px-3"><Badge color={e.attendance === "حاضر" ? "green" : "red"}>{e.attendance}</Badge></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-gray-200">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${tab === t.id ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">جاري التحميل...</div> : (
+        <>
+          {/* الموظفون */}
+          {tab === "employees" && (
+            <Card className="p-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      {["الكود", "الاسم", "الوظيفة", "الفرع", "الراتب الأساسي"].map(h => (
+                        <th key={h} className="text-right py-3 px-3 text-slate-600 font-bold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map(e => (
+                      <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="py-3 px-3 font-mono text-xs text-blue-700 font-bold">{e.employee_code}</td>
+                        <td className="py-3 px-3 font-bold text-slate-800">{e.full_name}</td>
+                        <td className="py-3 px-3"><Badge color="blue">{e.roles?.name_ar || "—"}</Badge></td>
+                        <td className="py-3 px-3 text-slate-600">{e.branches?.name || "—"}</td>
+                        <td className="py-3 px-3 font-bold text-slate-800">{Number(e.salary || 0).toLocaleString()} ج</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {/* الحضور */}
+          {tab === "attendance" && (
+            <Card className="p-4">
+              <p className="text-sm text-slate-500 mb-4">تسجيل حضور وغياب اليوم: <strong>{new Date().toLocaleDateString("ar-EG")}</strong></p>
+              <div className="space-y-2">
+                {employees.map(e => (
+                  <div key={e.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-gradient-to-br from-blue-400 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">{e.full_name[0]}</div>
+                      <div>
+                        <p className="font-semibold text-slate-800 text-sm">{e.full_name}</p>
+                        <p className="text-xs text-slate-500">{e.roles?.name_ar}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => markAttendance(e.id, "حاضر")} className="bg-green-100 hover:bg-green-200 text-green-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-green-200">✓ حاضر</button>
+                      <button onClick={() => markAttendance(e.id, "غائب")} className="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-red-200">✕ غائب</button>
+                      <button onClick={() => markAttendance(e.id, "إجازة")} className="bg-amber-100 hover:bg-amber-200 text-amber-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-amber-200">إجازة</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* السلف */}
+          {tab === "advances" && (
+            <div className="space-y-3">
+              <button onClick={() => setShowAdvForm(!showAdvForm)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+                <Icon name="plus" size={16} /> سلفة جديدة
+              </button>
+              {showAdvForm && (
+                <Card className="p-4 border-2 border-blue-200 bg-blue-50/30">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">الموظف *</label>
+                      <select value={advForm.employee_id} onChange={e => setAdvForm({ ...advForm, employee_id: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        <option value="">-- اختر الموظف --</option>
+                        {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">المبلغ *</label>
+                      <input type="number" value={advForm.amount} onChange={e => setAdvForm({ ...advForm, amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="0" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">السبب</label>
+                      <input value={advForm.reason} onChange={e => setAdvForm({ ...advForm, reason: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="سبب السلفة..." />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={saveAdvance} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving ? "جاري الحفظ..." : "حفظ السلفة"}</button>
+                    <button onClick={() => setShowAdvForm(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+                  </div>
+                </Card>
+              )}
+              <Card className="p-4">
+                {advances.length === 0 ? <p className="text-center py-6 text-slate-400 text-sm">لا توجد سلف مسجلة</p> : (
+                  <table className="w-full text-sm">
+                    <thead><tr className="bg-slate-50">{["الموظف", "المبلغ", "السبب", "التاريخ", "الحالة"].map(h => <th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {advances.map(a => (
+                        <tr key={a.id} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="py-2 px-3 font-semibold text-slate-800">{a.employees?.full_name || "—"}</td>
+                          <td className="py-2 px-3 font-bold text-red-600">{Number(a.amount).toLocaleString()} ج</td>
+                          <td className="py-2 px-3 text-slate-600">{a.reason || "—"}</td>
+                          <td className="py-2 px-3 text-slate-500">{a.created_at?.split("T")[0]}</td>
+                          <td className="py-2 px-3"><Badge color={a.status === "مسدد" ? "green" : "red"}>{a.status}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            </div>
+          )}
+
+          {/* الرواتب */}
+          {tab === "payroll" && (
+            <div className="space-y-3">
+              <button onClick={() => setShowPayForm(!showPayForm)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+                <Icon name="plus" size={16} /> صرف راتب
+              </button>
+              {showPayForm && (
+                <Card className="p-4 border-2 border-blue-200 bg-blue-50/30">
+                  <h3 className="font-bold text-slate-800 mb-4">صرف راتب موظف</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">الموظف *</label>
+                      <select value={payForm.employee_id} onChange={e => {
+                        const emp = employees.find(em => em.id === e.target.value);
+                        setPayForm({ ...payForm, employee_id: e.target.value, basic_salary: emp?.salary || "" });
+                      }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        <option value="">-- اختر الموظف --</option>
+                        {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">الشهر *</label>
+                      <input type="month" value={payForm.month} onChange={e => setPayForm({ ...payForm, month: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                    </div>
+                    {[["الراتب الأساسي", "basic_salary"], ["المكافآت", "bonus"], ["الخصومات", "deductions"], ["استقطاع السلف", "advances"]].map(([label, key]) => (
+                      <div key={key}>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+                        <input type="number" value={payForm[key]} onChange={e => setPayForm({ ...payForm, [key]: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      </div>
+                    ))}
+                    <div className="col-span-2 bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                      <p className="text-sm text-slate-500 mb-1">صافي الراتب</p>
+                      <p className="font-black text-2xl text-blue-700">
+                        {(Number(payForm.basic_salary || 0) + Number(payForm.bonus || 0) - Number(payForm.deductions || 0) - Number(payForm.advances || 0)).toLocaleString()} ج
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={savePayroll} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving ? "جاري الحفظ..." : "صرف الراتب"}</button>
+                    <button onClick={() => setShowPayForm(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+                  </div>
+                </Card>
+              )}
+              <Card className="p-4">
+                {payroll.length === 0 ? <p className="text-center py-6 text-slate-400 text-sm">لا توجد رواتب مسجلة</p> : (
+                  <table className="w-full text-sm">
+                    <thead><tr className="bg-slate-50">{["الموظف", "الشهر", "الأساسي", "المكافآت", "الخصومات", "الصافي", "الحالة"].map(h => <th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {payroll.map(p => (
+                        <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="py-2 px-3 font-semibold text-slate-800">{p.employees?.full_name || "—"}</td>
+                          <td className="py-2 px-3 text-slate-600">{p.month}</td>
+                          <td className="py-2 px-3 text-slate-700">{Number(p.basic_salary).toLocaleString()} ج</td>
+                          <td className="py-2 px-3 text-green-600">{Number(p.bonus).toLocaleString()} ج</td>
+                          <td className="py-2 px-3 text-red-600">{Number(p.deductions).toLocaleString()} ج</td>
+                          <td className="py-2 px-3 font-black text-blue-700">{Number(p.net_salary).toLocaleString()} ج</td>
+                          <td className="py-2 px-3"><Badge color={p.status === "مدفوع" ? "green" : "yellow"}>{p.status}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-// REPORTS
+// BANKS - LIVE
+function AccountsScreen() {
+  const [banks, setBanks] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [showBankForm, setShowBankForm] = useState(false);
+  const [showTxForm, setShowTxForm] = useState(false);
+  const [selectedBank, setSelectedBank] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [bankForm, setBankForm] = useState({ name: "", account_number: "", balance: "" });
+  const [txForm, setTxForm] = useState({ bank_id: "", type: "إيداع", amount: "", description: "", reference: "" });
+
+  const load = async () => {
+    setLoading(true);
+    const [banksRes, txRes] = await Promise.all([
+      supabase.from("banks").select("*").order("created_at"),
+      supabase.from("bank_transactions").select("*, banks(name)").order("created_at", { ascending: false }).limit(50),
+    ]);
+    setBanks(banksRes.data || []);
+    setTransactions(txRes.data || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const totalBalance = banks.reduce((s, b) => s + Number(b.balance || 0), 0);
+
+  const saveBank = async () => {
+    if (!bankForm.name) { setErrorMsg("اسم البنك مطلوب"); return; }
+    setSaving(true);
+    const { error } = await supabase.from("banks").insert({ name: bankForm.name, account_number: bankForm.account_number, balance: Number(bankForm.balance || 0) });
+    setSaving(false);
+    if (error) { setErrorMsg("خطأ أثناء الحفظ"); return; }
+    setShowBankForm(false); setBankForm({ name: "", account_number: "", balance: "" }); load();
+  };
+
+  const saveTransaction = async () => {
+    if (!txForm.bank_id || !txForm.amount) { setErrorMsg("البنك والمبلغ مطلوبان"); return; }
+    setSaving(true);
+    const { error: txError } = await supabase.from("bank_transactions").insert({ bank_id: txForm.bank_id, type: txForm.type, amount: Number(txForm.amount), description: txForm.description, reference: txForm.reference });
+    if (!txError) {
+      const bank = banks.find(b => b.id === txForm.bank_id);
+      const newBalance = txForm.type === "إيداع" ? Number(bank.balance || 0) + Number(txForm.amount) : Number(bank.balance || 0) - Number(txForm.amount);
+      await supabase.from("banks").update({ balance: newBalance }).eq("id", txForm.bank_id);
+    }
+    setSaving(false);
+    if (txError) { setErrorMsg("خطأ أثناء الحفظ"); return; }
+    setShowTxForm(false); setTxForm({ bank_id: "", type: "إيداع", amount: "", description: "", reference: "" }); load();
+  };
+
+  const bankTx = selectedBank ? transactions.filter(t => t.bank_id === selectedBank) : transactions;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-black text-slate-800">البنوك والحسابات</h1>
+        <div className="flex gap-2">
+          <button onClick={() => setShowBankForm(!showBankForm)} className="flex items-center gap-2 bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-slate-700">
+            <Icon name="plus" size={16} /> بنك جديد
+          </button>
+          <button onClick={() => setShowTxForm(!showTxForm)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+            <Icon name="plus" size={16} /> حركة جديدة
+          </button>
+        </div>
+      </div>
+
+      {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{errorMsg}</div>}
+
+      {/* إجمالي الأرصدة */}
+      <div className="bg-gradient-to-l from-blue-600 to-blue-800 text-white rounded-2xl p-5 shadow-lg">
+        <p className="text-blue-200 text-sm mb-1">إجمالي أرصدة البنوك</p>
+        <p className="text-4xl font-black">{totalBalance.toLocaleString()} ج</p>
+        <p className="text-blue-200 text-xs mt-2">{banks.length} حساب بنكي</p>
+      </div>
+
+      {/* فورم بنك جديد */}
+      {showBankForm && (
+        <Card className="p-4 border-2 border-slate-200">
+          <h3 className="font-bold text-slate-800 mb-3">إضافة بنك جديد</h3>
+          <div className="grid grid-cols-3 gap-3">
+            {[["اسم البنك *", "name", "text", "مثال: بنك مصر"], ["رقم الحساب", "account_number", "text", "0000000000"], ["الرصيد الافتتاحي", "balance", "number", "0"]].map(([label, key, type, ph]) => (
+              <div key={key}>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+                <input type={type} value={bankForm[key]} onChange={e => setBankForm({ ...bankForm, [key]: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder={ph} />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button onClick={saveBank} disabled={saving} className="flex-1 bg-slate-600 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving ? "جاري الحفظ..." : "إضافة البنك"}</button>
+            <button onClick={() => setShowBankForm(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+          </div>
+        </Card>
+      )}
+
+      {/* فورم حركة جديدة */}
+      {showTxForm && (
+        <Card className="p-4 border-2 border-blue-200 bg-blue-50/30">
+          <h3 className="font-bold text-slate-800 mb-3">تسجيل حركة بنكية</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">البنك *</label>
+              <select value={txForm.bank_id} onChange={e => setTxForm({ ...txForm, bank_id: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                <option value="">-- اختر البنك --</option>
+                {banks.map(b => <option key={b.id} value={b.id}>{b.name} — {Number(b.balance).toLocaleString()} ج</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">نوع الحركة</label>
+              <select value={txForm.type} onChange={e => setTxForm({ ...txForm, type: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                <option value="إيداع">إيداع</option>
+                <option value="سحب">سحب</option>
+                <option value="تحويل صادر">تحويل صادر</option>
+                <option value="تحويل وارد">تحويل وارد</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">المبلغ *</label>
+              <input type="number" value={txForm.amount} onChange={e => setTxForm({ ...txForm, amount: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="0" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">المرجع</label>
+              <input value={txForm.reference} onChange={e => setTxForm({ ...txForm, reference: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="رقم الشيك أو التحويل" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-1">البيان</label>
+              <input value={txForm.description} onChange={e => setTxForm({ ...txForm, description: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" placeholder="وصف الحركة..." />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button onClick={saveTransaction} disabled={saving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-bold disabled:opacity-60">{saving ? "جاري الحفظ..." : "حفظ الحركة"}</button>
+            <button onClick={() => setShowTxForm(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">إلغاء</button>
+          </div>
+        </Card>
+      )}
+
+      {loading ? <div className="text-center py-10 text-slate-400 text-sm">جاري التحميل...</div> : (
+        <>
+          {/* بطاقات البنوك */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {banks.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-6 col-span-2">لا توجد بنوك. اضغط "بنك جديد" للبدء.</p>
+            ) : banks.map(b => (
+              <Card key={b.id} className={`p-4 cursor-pointer hover:shadow-md transition-all ${selectedBank === b.id ? "border-2 border-blue-500" : ""}`} onClick={() => setSelectedBank(selectedBank === b.id ? null : b.id)}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl flex items-center justify-center text-white font-black">{b.name[0]}</div>
+                    <div>
+                      <p className="font-black text-slate-800">{b.name}</p>
+                      <p className="text-xs text-slate-500">{b.account_number || "بدون رقم حساب"}</p>
+                    </div>
+                  </div>
+                  <div className="text-left">
+                    <p className="text-xs text-slate-500">الرصيد الحالي</p>
+                    <p className={`font-black text-xl ${Number(b.balance) >= 0 ? "text-green-700" : "text-red-700"}`}>{Number(b.balance).toLocaleString()} ج</p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* كشف الحركات */}
+          <Card className="p-4">
+            <h3 className="font-bold text-slate-800 mb-3">
+              {selectedBank ? `كشف حركات: ${banks.find(b => b.id === selectedBank)?.name}` : "آخر الحركات البنكية"}
+            </h3>
+            {bankTx.length === 0 ? (
+              <p className="text-center py-6 text-slate-400 text-sm">لا توجد حركات مسجلة</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-slate-50">{["التاريخ", "البنك", "النوع", "البيان", "المرجع", "المبلغ"].map(h => <th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {bankTx.map(t => (
+                      <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="py-2 px-3 text-slate-500">{t.created_at?.split("T")[0]}</td>
+                        <td className="py-2 px-3 font-semibold text-slate-800">{t.banks?.name || "—"}</td>
+                        <td className="py-2 px-3"><Badge color={t.type === "إيداع" || t.type === "تحويل وارد" ? "green" : "red"}>{t.type}</Badge></td>
+                        <td className="py-2 px-3 text-slate-600">{t.description || "—"}</td>
+                        <td className="py-2 px-3 text-slate-500 text-xs">{t.reference || "—"}</td>
+                        <td className={`py-2 px-3 font-black ${t.type === "إيداع" || t.type === "تحويل وارد" ? "text-green-700" : "text-red-700"}`}>
+                          {t.type === "إيداع" || t.type === "تحويل وارد" ? "+" : "-"}{Number(t.amount).toLocaleString()} ج
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// REPORTS - LIVE
 function ReportsScreen() {
+  const [activeReport, setActiveReport] = useState(null);
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const loadReport = async (type) => {
+    setActiveReport(type);
+    setLoading(true);
+    setData([]);
+
+    if (type === "sales") {
+      let query = supabase.from("sales").select("*, customers(name)").order("created_at", { ascending: false });
+      if (dateFrom) query = query.gte("created_at", dateFrom);
+      if (dateTo) query = query.lte("created_at", dateTo + "T23:59:59");
+      const { data: rows } = await query;
+      setData(rows || []);
+    } else if (type === "purchases") {
+      let query = supabase.from("purchases").select("*, suppliers(name)").order("created_at", { ascending: false });
+      if (dateFrom) query = query.gte("created_at", dateFrom);
+      if (dateTo) query = query.lte("created_at", dateTo + "T23:59:59");
+      const { data: rows } = await query;
+      setData(rows || []);
+    } else if (type === "stock") {
+      const { data: rows } = await supabase.from("products").select("*").order("name");
+      setData(rows || []);
+    } else if (type === "profits") {
+      const [salesRes, purchRes] = await Promise.all([
+        supabase.from("sales").select("total, paid, created_at, customers(name)"),
+        supabase.from("purchases").select("total, created_at"),
+      ]);
+      const totalSales = (salesRes.data || []).reduce((s, r) => s + Number(r.total || 0), 0);
+      const totalPurchases = (purchRes.data || []).reduce((s, r) => s + Number(r.total || 0), 0);
+      const totalCollected = (salesRes.data || []).reduce((s, r) => s + Number(r.paid || 0), 0);
+      setData([{ totalSales, totalPurchases, grossProfit: totalSales - totalPurchases, totalCollected, totalRemaining: totalSales - totalCollected }]);
+    } else if (type === "customers") {
+      const { data: rows } = await supabase.from("customers").select("name, balance, credit_limit").order("balance", { ascending: false });
+      setData(rows || []);
+    }
+    setLoading(false);
+  };
+
+  const printReport = () => window.print();
+
   const reports = [
-    { title: "تقرير المبيعات", icon: "sales", color: "blue", desc: "تفاصيل المبيعات حسب الفترة والعميل" },
-    { title: "تقرير المشتريات", icon: "purchase", color: "steel", desc: "تفاصيل المشتريات حسب المورد" },
-    { title: "تقرير المخزون", icon: "warehouse", color: "green", desc: "حركة الأصناف والمخزون الحالي" },
-    { title: "الأرباح والخسائر", icon: "money", color: "gold", desc: "قائمة الدخل والمصروفات" },
-    { title: "تقرير البسكول", icon: "truck", color: "blue", desc: "حركة الشاحنات والأوزان" },
-    { title: "ميزان المراجعة", icon: "accounts", color: "steel", desc: "أرصدة الحسابات الختامية" },
-    { title: "الأرباح حسب العميل", icon: "customers", color: "blue", desc: "هامش الربح لكل عميل" },
-    { title: "الأرباح حسب الصنف", icon: "products", color: "green", desc: "هامش الربح لكل صنف" },
-    { title: "الأرباح حسب الفرع", icon: "branch", color: "gold", desc: "مقارنة أداء الفروع" },
+    { id: "sales", title: "تقرير المبيعات", icon: "sales", color: "blue", desc: "جميع فواتير البيع مع التفاصيل" },
+    { id: "purchases", title: "تقرير المشتريات", icon: "purchase", color: "steel", desc: "جميع فواتير الشراء مع التفاصيل" },
+    { id: "stock", title: "تقرير المخزون", icon: "warehouse", color: "green", desc: "الكميات الحالية وقيمة المخزون" },
+    { id: "profits", title: "الأرباح والخسائر", icon: "money", color: "gold", desc: "إجمالي الإيرادات والتكاليف والأرباح" },
+    { id: "customers", title: "أرصدة العملاء", icon: "customers", color: "blue", desc: "الأرصدة المستحقة لكل عميل" },
   ];
+
   const colors = { blue: "bg-blue-100 text-blue-700", steel: "bg-slate-100 text-slate-700", green: "bg-green-100 text-green-700", gold: "bg-amber-100 text-amber-700" };
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-black text-slate-800">التقارير</h1>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {reports.map(r => (
-          <Card key={r.title} className="p-4 cursor-pointer hover:shadow-md transition-all hover:border-blue-200 group">
-            <div className={`w-12 h-12 ${colors[r.color]} rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
-              <Icon name={r.icon} size={22} />
+          <Card key={r.id} className={`p-4 cursor-pointer hover:shadow-md transition-all ${activeReport === r.id ? "border-2 border-blue-500" : "hover:border-blue-200"}`}>
+            <div className={`w-10 h-10 ${colors[r.color]} rounded-xl flex items-center justify-center mb-2`}>
+              <Icon name={r.icon} size={20} />
             </div>
-            <h3 className="font-bold text-slate-800 mb-1">{r.title}</h3>
+            <h3 className="font-bold text-slate-800 text-sm mb-1">{r.title}</h3>
             <p className="text-xs text-slate-500 mb-3">{r.desc}</p>
-            <div className="flex gap-2">
-              <button className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-600 py-1.5 rounded-lg text-xs font-semibold border border-slate-200">عرض</button>
-              <button className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 flex items-center justify-center gap-1">
-                <Icon name="print" size={12} /> طباعة
-              </button>
-            </div>
+            <button onClick={() => loadReport(r.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded-lg text-xs font-bold">عرض التقرير</button>
           </Card>
         ))}
       </div>
+
+      {activeReport && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-slate-800">{reports.find(r => r.id === activeReport)?.title}</h3>
+            <div className="flex items-center gap-2">
+              {(activeReport === "sales" || activeReport === "purchases") && (
+                <>
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  <span className="text-xs text-slate-500">إلى</span>
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  <button onClick={() => loadReport(activeReport)} className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-blue-700">بحث</button>
+                </>
+              )}
+              <button onClick={printReport} className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold">
+                <Icon name="print" size={14} /> طباعة
+              </button>
+            </div>
+          </div>
+
+          {loading ? <div className="text-center py-8 text-slate-400 text-sm">جاري تحميل التقرير...</div> : (
+
+            <>
+              {/* تقرير المبيعات */}
+              {activeReport === "sales" && (
+                <>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    {[["عدد الفواتير", data.length, "blue"],["إجمالي المبيعات", `${data.reduce((s,r)=>s+Number(r.total||0),0).toLocaleString()} ج`, "green"],["إجمالي المحصل", `${data.reduce((s,r)=>s+Number(r.paid||0),0).toLocaleString()} ج`, "gold"]].map(([k,v,col])=>(
+                      <div key={k} className={`rounded-lg p-3 text-center ${col==="blue"?"bg-blue-50":col==="green"?"bg-green-50":"bg-amber-50"}`}>
+                        <p className="text-xs text-slate-500 mb-1">{k}</p>
+                        <p className={`font-black ${col==="blue"?"text-blue-700":col==="green"?"text-green-700":"text-amber-700"}`}>{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-slate-50">{["رقم الفاتورة","التاريخ","العميل","الإجمالي","المدفوع","المتبقي","الحالة"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                      <tbody>
+                        {data.map(s=>(
+                          <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="py-2 px-3 font-mono text-blue-600 text-xs font-bold">{s.invoice_number}</td>
+                            <td className="py-2 px-3 text-slate-600">{s.created_at?.split("T")[0]}</td>
+                            <td className="py-2 px-3 font-semibold text-slate-800">{s.customers?.name||"—"}</td>
+                            <td className="py-2 px-3 font-bold text-slate-800">{Number(s.total).toLocaleString()} ج</td>
+                            <td className="py-2 px-3 text-green-600 font-semibold">{Number(s.paid).toLocaleString()} ج</td>
+                            <td className="py-2 px-3 text-red-600 font-semibold">{(Number(s.total)-Number(s.paid)).toLocaleString()} ج</td>
+                            <td className="py-2 px-3"><Badge color={s.status==="مكتمل"?"green":s.status==="جزئي"?"yellow":"red"}>{s.status}</Badge></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {/* تقرير المشتريات */}
+              {activeReport === "purchases" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    {[["عدد الفواتير",data.length,"blue"],["إجمالي المشتريات",`${data.reduce((s,r)=>s+Number(r.total||0),0).toLocaleString()} ج`,"steel"]].map(([k,v,col])=>(
+                      <div key={k} className={`rounded-lg p-3 text-center ${col==="blue"?"bg-blue-50":"bg-slate-50"}`}>
+                        <p className="text-xs text-slate-500 mb-1">{k}</p>
+                        <p className={`font-black ${col==="blue"?"text-blue-700":"text-slate-700"}`}>{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-slate-50">{["رقم الفاتورة","التاريخ","المورد","الإجمالي","المدفوع","المتبقي","الحالة"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                      <tbody>
+                        {data.map(p=>(
+                          <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="py-2 px-3 font-mono text-blue-600 text-xs font-bold">{p.invoice_number}</td>
+                            <td className="py-2 px-3 text-slate-600">{p.created_at?.split("T")[0]}</td>
+                            <td className="py-2 px-3 font-semibold text-slate-800">{p.suppliers?.name||"—"}</td>
+                            <td className="py-2 px-3 font-bold text-slate-800">{Number(p.total).toLocaleString()} ج</td>
+                            <td className="py-2 px-3 text-green-600 font-semibold">{Number(p.paid).toLocaleString()} ج</td>
+                            <td className="py-2 px-3 text-red-600 font-semibold">{(Number(p.total)-Number(p.paid)).toLocaleString()} ج</td>
+                            <td className="py-2 px-3"><Badge color={p.status==="مكتمل"?"green":p.status==="جزئي"?"yellow":"red"}>{p.status}</Badge></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {/* تقرير المخزون */}
+              {activeReport === "stock" && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="bg-slate-50">{["الصنف","النوع","المقاس","الوحدة","سعر البيع","المخزون","القيمة","الحالة"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {data.map(p=>(
+                        <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="py-2 px-3 font-bold text-slate-800">{p.name}</td>
+                          <td className="py-2 px-3 text-slate-600">{p.type||"—"}</td>
+                          <td className="py-2 px-3 text-slate-600">{p.size||"—"}</td>
+                          <td className="py-2 px-3 text-slate-600">{p.unit}</td>
+                          <td className="py-2 px-3 text-slate-700">{Number(p.sell_price||0).toLocaleString()} ج</td>
+                          <td className="py-2 px-3 font-bold">{p.stock} {p.unit}</td>
+                          <td className="py-2 px-3 font-bold text-green-700">{(Number(p.stock||0)*Number(p.sell_price||0)).toLocaleString()} ج</td>
+                          <td className="py-2 px-3"><Badge color={Number(p.stock)<=Number(p.reorder_level||0)?"red":"green"}>{Number(p.stock)<=Number(p.reorder_level||0)?"منخفض":"متاح"}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* الأرباح والخسائر */}
+              {activeReport === "profits" && data.length > 0 && (
+                <div className="space-y-3">
+                  {[
+                    ["إجمالي المبيعات", data[0].totalSales, "green"],
+                    ["إجمالي المشتريات (التكلفة)", data[0].totalPurchases, "red"],
+                    ["إجمالي الربح", data[0].grossProfit, data[0].grossProfit >= 0 ? "green" : "red"],
+                    ["إجمالي المحصل من العملاء", data[0].totalCollected, "blue"],
+                    ["إجمالي المتبقي من العملاء", data[0].totalRemaining, "gold"],
+                  ].map(([k, v, col]) => (
+                    <div key={k} className={`flex justify-between items-center rounded-xl px-5 py-4 border ${col==="green"?"bg-green-50 border-green-200":col==="red"?"bg-red-50 border-red-200":col==="blue"?"bg-blue-50 border-blue-200":"bg-amber-50 border-amber-200"}`}>
+                      <span className="font-semibold text-slate-700">{k}</span>
+                      <span className={`font-black text-xl ${col==="green"?"text-green-700":col==="red"?"text-red-700":col==="blue"?"text-blue-700":"text-amber-700"}`}>{Number(v).toLocaleString()} ج</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* أرصدة العملاء */}
+              {activeReport === "customers" && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="bg-slate-50">{["العميل","الحد الائتماني","الرصيد المستحق","الحالة"].map(h=><th key={h} className="text-right py-2 px-3 text-slate-600 font-bold">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {data.map((c,i)=>(
+                        <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="py-2 px-3 font-bold text-slate-800">{c.name}</td>
+                          <td className="py-2 px-3 text-slate-600">{Number(c.credit_limit||0).toLocaleString()} ج</td>
+                          <td className="py-2 px-3 font-bold text-red-600">{Number(c.balance||0).toLocaleString()} ج</td>
+                          <td className="py-2 px-3"><Badge color={Number(c.balance)>0?"red":"green"}>{Number(c.balance)>0?"مديون":"سوي"}</Badge></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
@@ -1317,7 +2496,7 @@ export default function App() {
 
   const renderScreen = () => {
     switch (active) {
-      case "dashboard": return <Dashboard />;
+      case "dashboard": return <Dashboard user={user} />;
       case "branches": return <BranchesScreen />;
       case "products": return <ProductsScreen />;
       case "customers": return <CustomersScreen />;
@@ -1326,7 +2505,8 @@ export default function App() {
       case "purchases": return <PurchasesScreen />;
       case "manufacturing": return <ManufacturingScreen />;
       case "hr": return <HRScreen />;
-      case "reports": return <ReportsScreen />;
+      case "accounts": return <AccountsScreen />;
+      case "reports": return <ReportsScreen user={user} />;
       case "permissions": return <PermissionsScreen />;
       case "backup": return <BackupScreen />;
       default:
